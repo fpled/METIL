@@ -1,0 +1,757 @@
+import "lazy/CppCompiledFunctionSet.met"
+#
+class MatSparse[ T, br = 1, bc = 1, nr = 1, nc = 1, ST = SizeType ] inherits MatAncestor
+    property is_a_MatSparse
+    static simd_size := default_simd_size( T )
+    static const RD := MatPartSparseRowData[ T, ST, br, bc, nr, nc, simd_size ]
+    static const nb_row_per_block := br * nr
+    static const nb_col_per_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    if nb_row_per_block * nb_col_per_block < simd_size
+        simd_size = 1
+
+    static func_add_matfull := UntypedPtr( NULL )
+    static cpp_func ~= CppCompiledFunctionSet_
+    
+    rows := Vec[ RD ]()
+    nb_rows_ := ST( 0 )
+    nb_cols_ := ST( 0 )
+    
+    def init( nb_rows = 0, nb_cols = nb_rows ) when nb_rows.is_a_number
+        init_using_default_values( self )
+        resize( nb_rows, nb_cols )
+        if not func_add_matfull
+            cpp_func.init( self )
+            func_add_matfull = cpp_func[ "func_add_matfull" ]
+    
+    def add( m, indices ) when m.tensor_order == 2 and indices.tensor_order == 1
+        # assert( indices )
+        exec_ccode_function( func_add_matfull, rows.get_begin(), m.data.get_begin(), indices.get_begin(), Int32( indices.size ) )
+    
+    def resize( nb_rows, nb_cols = nb_rows )
+        rows.size = nb_rows // nb_row_per_block
+        nb_rows_ = nb_rows
+        nb_cols_ = nb_cols
+        
+    def select( r, c )
+        return rows[ r // nb_row_per_block ][ r % nb_row_per_block, c ]
+        
+    def get_nb_rows
+        return nb_rows_
+        
+    def get_nb_cols
+        return nb_cols_
+    
+    def block( r, c )
+        return rows[ r // nb_row_per_block ].block( c )
+
+    def get_additional_cpp_methods
+        args := Vec[String]( [ "ST row, ST col" ] )
+        vargs := Vec[String]( [ "row, col" ] )
+        for r in 0 .. br
+            for c in 0 .. bc
+                args.push_back( "T v_$(r)_$(c)" )
+                vargs.push_back( "v_$(r)_$(c)" )
+        res := ""
+        res <<< "    void add( $(join(args,", ") ) ) {"
+        res <<< "        rows[ row / $nb_row_per_block ].add( $(join(vargs,", ") ) );"
+        res <<< "    }"
+        
+        return res
+        
+    def get_src( stream ) 
+        stream <<< "#include <iostream>"
+        vargs := Vec[String]()
+        for r in 0 .. br
+            for c in 0 .. bc
+                vargs.push_back( "ke[ ( $br * i + $r ) * nb_ind * $bc + $bc * j + $c ]" )
+        #
+        stream <<<< 
+            template<class RD,class T1,class T2> void func_add_matfull( RD *rows, const T1 *ke, const T2 *ind, int nb_ind ) {
+                for(int i=0;i<nb_ind;++i)
+                    for(int j=0;j<nb_ind;++j)
+                        rows[ ind[i] ].add( 0, $bc * ind[j], $(join(vargs,", ") ) );
+            }
+
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "func_add_matfull", [ Ptr[RD], Ptr[T], Ptr[Int32], Int32 ] )
+        ]
+    def get_control_sum
+        return last_modification_time_or_zero_of_file_named( __file_at_stack_level__(0) )
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+#~
+    RD -> RowData
+    T1 -> ScalarType for vec
+~#
+class MatPartSparseMatVecCompiledFunction[ RD, T1, T, ST, br, bc, nr, nc ]
+    # static const br := RD::br; nr := RD::nr; bc := RD::bc; nc := RD::nc; 
+    static const simd_size := RD::simd_size
+    static const row_per_big_block := br * nr
+    static const col_per_big_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    static const dot_ind := ".col" * several_blocks
+        
+    static func_mult_vec := UntypedPtr( NULL )
+    static cpp_func ~= CppCompiledFunctionSet_
+        
+    def init
+        init_using_default_values( self )
+        if not func_mult_vec
+            cpp_func.init( self )
+            func_mult_vec = cpp_func[ "mat_mult_vec" ]
+        
+    def mul_vec( m, v ) pertinence 10
+        size := m.nb_rows; common_size := size; offset_mat_col := 0; offset_mat_row := 0; offset_vec := 0
+        res := Vec[ T ]( size = size )
+        exec_ccode_function( func_mult_vec, res.get_begin(), m.rows.get_begin(), v.get_begin() + offset_vec - offset_mat_col, offset_mat_row, offset_mat_row + size, offset_mat_col, offset_mat_col + common_size )
+        return res
+        
+    def make_col_kern( stream, beg_row, end_row, beg_col, end_col )
+        stream <<< "            ST v_ind = m->indices[ni]$dot_ind;"
+        if several_blocks
+            stream <<< "            switch ( m->indices[ni].nze ) {"
+        for bf in 1 .. 2 ^ ( nr * nc )
+            if several_blocks
+                stream <<< "            case $bf:"
+            lc := MatPartSparseRowDataIndexCalculator[ bf, br, bc, nr, nc, simd_size ]()
+            
+            if beg_col.size or end_col.size
+                for c in 0 .. col_per_big_block
+                    col_cond_list := Vec[String]()
+                    if beg_col.size  col_cond_list.push_back( "$c >= $beg_col" )
+                    if end_col.size  col_cond_list.push_back( "$c < $end_col" )
+                    col_cond := join( col_cond_list, " and " )
+                    if any( lc.nz.col( c ) )
+                        stream <<< "            if ( $col_cond ) {"
+                        for r in 0 .. row_per_big_block
+                            if lc.nz[ r, c ]
+                                if beg_row.size or end_row.size
+                                    row_cond_list := Vec[String]()
+                                    if beg_row.size  row_cond_list.push_back( "$r >= $beg_row" )
+                                    if end_row.size  row_cond_list.push_back( "$r < $end_row" )
+                                    row_cond := join( row_cond_list, " and " )
+                                    stream <<< "              if ( $row_cond )"
+                                stream <<< "                res_$r += d[$(lc.ind[r,c])]*v[v_ind+$c];"
+                    if any( lc.nz.col(c) )
+                        stream <<< "            }"
+            else
+                for r in 0 .. row_per_big_block
+                    ite := Vec[ String ]()
+                    for c in 0 .. col_per_big_block
+                        if lc.nz[ r, c ]
+                            ite.push_back( "d[$(lc.ind[r,c])]*v[v_ind+$c]" )
+                    if ite.size
+                        stream <<< "            res_$r += $(join(ite,"+"));"
+            
+            
+            stream <<< "            d += $( lc.size );"
+            if several_blocks
+                stream <<< "              break;"
+        if several_blocks
+            stream <<< "            }"
+    
+    
+    def make_mat_mult_vec_kern( stream, partial )
+        if partial
+            stream <<< "template<class T,class RD,class T1,class ST> inline void mat_mult_vec_kern_partial( T *&res, const RD *m, const T1 *v, ST beg_row, ST end_row, ST beg_col, ST end_col ) {"
+        else
+            stream <<< "template<class T,class RD,class T1,class ST> inline void mat_mult_vec_kern_full( T *&res, const RD *m, const T1 *v, ST beg_col, ST end_col ) {"
+        for i in 0 .. row_per_big_block
+            stream <<< "    T res_$i = 0;"
+        
+        # first col block that contains beg_col
+        stream <<< "    ST ni = 0;"
+        stream <<< "    while ( ni < m->indices.size() and m->indices[ni]$dot_ind + $col_per_big_block <= beg_col ) ++ni; " # first block must contain offset_mat_col or be after
+        if several_blocks
+            stream <<< "    typename RD::T *d = m->data.data_ + m->indices[ni].off;"
+        else
+            lc := MatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+            stream <<< "    typename RD::T *d = m->data.data_ + $( lc.size ) * ni;"
+        # first block that won't be "fully" used -> end_ni-1
+        stream <<< "    ST end_ni = m->indices.size();"
+        stream <<< "    while ( end_ni and m->indices[end_ni-1]$dot_ind + $col_per_big_block > end_col ) --end_ni;"
+        # stream <<< "    std::cout << ni << ' ' << end_ni << ' ' << end_col << std::endl;"
+        
+        #
+        stream <<< "    if ( ni == end_ni ) {"
+        stream <<< "        if ( beg_col >= m->indices[ni]$dot_ind ) {"
+        stream <<< "            beg_col %= $col_per_big_block;"
+        stream <<< "            end_col %= $col_per_big_block;"
+        make_col_kern( stream, "beg_row"*partial, "end_row"*partial, "beg_col", "end_col" )
+        stream <<< "        }"
+        stream <<< "    }"
+        stream <<< "    else {"
+        stream <<< "        // beg block"
+        stream <<< "        if ( beg_col > m->indices[ni]$dot_ind ) {"
+        stream <<< "            beg_col %= $col_per_big_block;"
+        make_col_kern( stream, "beg_row"*partial, "end_row"*partial, "beg_col", "" )
+        stream <<< "            ++ni;"
+        stream <<< "        }"
+        stream <<< "        // mid blocks"
+        stream <<< "        for ( ; ni < end_ni; ni++ ) {"
+        make_col_kern( stream, "beg_row"*partial, "end_row"*partial, "", "" )
+        stream <<< "        }"
+        stream <<< "        // end block"
+        stream <<< "        if ( ni < m->indices.size() and m->indices[ni]$dot_ind + $col_per_big_block > end_col ) {"
+        stream <<< "            end_col %= $col_per_big_block;"
+        make_col_kern( stream, "beg_row"*partial, "end_row"*partial, "", "end_col" )
+        stream <<< "        }"
+        stream <<< "    }"
+        
+        #
+        for i in 0 .. row_per_big_block
+            if partial
+                stream << "    if ( $i >= beg_row and $i < end_row )"
+            stream <<< "    *(res++) = res_$i;"
+        stream <<< "}"
+        
+    
+    def get_src( stream )
+        stream <<< "#include <iostream>"
+        make_mat_mult_vec_kern( stream, false )
+        make_mat_mult_vec_kern( stream, true  )
+        #
+        stream <<< "template<class T,class RD,class T1,class ST> void mat_mult_vec( T *res, const RD *m, const T1 *v, ST beg_row, ST end_row, ST beg_col, ST end_col ) {"
+        stream <<< "    ST nb_big_row_to_skip = beg_row / $row_per_big_block;"
+        stream <<< "    ST nb_row_to_skip = nb_big_row_to_skip * $row_per_big_block;"
+        stream <<< "    m += nb_big_row_to_skip;"
+        stream <<< "    beg_row -= nb_row_to_skip;"
+        stream <<< "    end_row -= nb_row_to_skip;"
+        stream <<< "    // beg blocks"
+        stream <<< "    if ( beg_row ) {" # beg_row in [ 0, row_per_big_block [
+        stream <<< "        mat_mult_vec_kern_partial( res, m, v, beg_row, $row_per_big_block, beg_col, end_col );"
+        stream <<< "        m++; end_row -= $row_per_big_block - beg_row;"
+        stream <<< "    }"
+        stream <<< "    // main loop"
+        stream <<< "    while ( end_row >= $row_per_big_block ) {"
+        stream <<< "        mat_mult_vec_kern_full( res, m, v, beg_col, end_col );"
+        stream <<< "        m++; end_row -= $row_per_big_block;"
+        stream <<< "    }"
+        stream <<< "    // nb remaining rows < row_per_big_block"
+        stream <<< "    if ( end_row )"
+        stream <<< "        mat_mult_vec_kern_partial( res, m, v, 0, end_row, beg_col, end_col );"
+        stream <<< "}"
+
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "mat_mult_vec", [ Ptr[T], Ptr[RD], Ptr[T1], ST, ST, ST, ST ] )
+        ]
+    def get_control_sum
+        return last_modification_time_or_zero_of_file_named( __file_at_stack_level__(0) )
+
+
+#
+def mul( m, v_ ) when m.is_a_MatSparse and v_.tensor_order == 1 pertinence 10
+    v := Vec[ v_.T ]( v_ )
+    T := type_promote( partial_instanciation v.T, partial_instanciation m.T, mul )
+    mp := MatPartSparseMatVecCompiledFunction[ m.RD, v.T, T, m.ST, m.br, m.bc, m.nr, m.nc ]()
+    return mp.mul_vec( m, v )
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+#        
+class CholMatSparse[ T, br = 1, bc = 1, nr = 1, nc = 1, ST = SizeType, incomp = false ] inherits MatSparse[ T, br = 1, bc = 1, nr = 1, nc = 1, ST = SizeType ]
+    property is_a_CholMatSparse
+    static const dot_ind := ".col" * several_blocks
+    static func := UntypedPtr( NULL )
+    static cpp_func ~= CppCompiledFunctionSet_
+    
+    def init( M )
+        init_using_default_values( self )
+        if not func
+            cpp_func.init( self )
+            func = cpp_func[ "chol" ]
+        resize( M.nb_rows, M.nb_cols )
+        exec_ccode_function( func, rows, M.rows, M.get_nb_rows() )
+        
+    def get_src( stream ) pertinence 3
+        # assert( incomp, "TODO : not incomplete" )
+        assert( nr * nc == 1, "TODO : chol with several blocks" )
+        #
+        lc := MatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+        init_reg := ""
+        init_reg_z := ""
+        regs := ""
+        regargs := ""
+        at_least_nz_r_vec := Vec[String]()
+        for r in 0 .. nb_row_per_block
+            for c in 0 .. nb_col_per_block
+                init_reg << "T r_$(r)_$(c) = d[ $(lc.ind[ r, c ]) ];\n            "
+                init_reg_z << "T r_$(r)_$(c) = 0;\n            "
+                regs << ", r_$(r)_$(c)"
+                regargs << ", T &r_$(r)_$(c)"
+                at_least_nz_r_vec.push_back( "r_$(r)_$(c)" )
+        at_least_nz_r := join( at_least_nz_r_vec, " and " )
+                
+        push_reg := ""
+        for ind in lc.sorted_ind
+            push_reg << "res_row.data.push_back( r_$(ind[0])_$(ind[1]) );\n                "
+        for ind in lc.cpt .. lc.size
+            push_reg << "res_row.data.push_back( 0 );\n                "
+            
+        finalize_diag_ref := ""
+        for r in 0 .. br
+            for c in 0 .. r + 1
+                v := Vec[String]( [ "r_$(r)_$(c)" ] )
+                for c2 in 0 .. c
+                    v.push_back( "r_$(c)_$(c2) * r_$(r)_$(c2)" )
+                if c == r
+                    finalize_diag_ref << "r_$(r)_$(c) = sqrt( $(join(v," - ")) );\n                    "
+                else
+                    finalize_diag_ref << "r_$(r)_$(c) = ( $(join(v," - ")) ) / r_$(c)_$(c);\n                    "
+                    
+        sub_reg := ""
+        for r in 0 .. br
+            for c in 0 .. bc
+                v := Vec[String]()
+                for c2 in 0 .. bc
+                    v.push_back( "dc[ $(lc.ind[c,c2]) ] * dr[ $(lc.ind[r,c2]) ]" )
+                sub_reg << "r_$(r)_$(c) -= $(join( v, " + " ));\n                        "
+                
+        finalize_extr := ""
+        for r in 0 .. br
+            for c in 0 .. bc
+                v := Vec[String]( [ "r_$(r)_$(c)" ] )
+                for c2 in 0 .. c
+                    v.push_back( "di[ $(lc.ind[c,c2]) ] * r_$(r)_$(c2)" )
+                finalize_extr << "r_$(r)_$(c) = ( $(join(v," - ")) ) / di[ $( lc.ind[c,c] ) ];\n                    "
+                    
+        main_body := ""
+            
+        #
+        stream <<<<
+            #include <iostream>
+            #include <cmath>
+            #include <assert.h>
+            #include <vector>
+            template<class RD,class ST,class T> inline void push_( RD &mat_row, RD &res_row, RD &res_col, ST r, ST c $regargs, std::vector<ST> &diag ) {
+                if ( res_row.indices.size() and res_row.indices[0] < c and res_col.indices.size() ) {
+                    ST cc=0, cr=0;
+                    while ( true ) {
+                        if ( res_col.indices[cc] == res_row.indices[cr] ) {
+                            typename RD::T *dc = res_col.data.data_ + cc * $( lc.size );
+                            typename RD::T *dr = res_row.data.data_ + cr * $( lc.size );
+                            $sub_reg
+                            ++cc; ++cr;
+                            if ( cc == res_col.indices.size() or cr == res_row.indices.size() or res_row.indices[cr] >= c ) break;
+                        }
+                        else if ( res_col.indices[cc] < res_row.indices[cr] ) {
+                            ++cc;
+                            if ( cc == res_col.indices.size() ) break;
+                        }
+                        else {
+                            ++cr;
+                            if ( cr == res_row.indices.size() or res_row.indices[cr] >= c ) break;
+                        }
+                    }
+                }
+                // finalize
+                if ( ( $at_least_nz_r ) or c==r ) {
+                    res_row.indices.push_back( c );
+                    if ( c == r ) {
+                        diag.push_back( res_row.data.size_ );
+                        $finalize_diag_ref
+                    }
+                    else {
+                        const typename RD::T *di = res_col.data.data_ + diag[ c / $br ];
+                        $finalize_extr
+                    }
+                    $push_reg
+                }
+            }
+            template<class RD,class ST> void chol( RD *res, RD *mat, ST nb_rows ) {
+                typedef typename RD::T T;
+                std::vector<ST> diag; // diag.reserve( nb_rows / $br );
+                for(ST r=0;r<nb_rows;r+=$br) {
+                    RD &mat_row = mat[ r / $br ];
+                    RD &res_row = res[ r / $br ];
+                    // res_row.indices.reserve( mat_row.indices.size() );
+                    // res_row.data.reserve( mat_row.data.size() );
+                    if ( $incomp ) {
+                        for( ST ci=0; ci < mat_row.indices.size(); ++ci ) {
+                            ST c = mat_row.indices[ci]$dot_ind;
+                            if ( c > r )
+                                break;
+                            const typename RD::T *d = mat_row.data.data_ + $(lc.size) * ci;
+                            $init_reg
+                            push_( mat_row, res_row, res[ c / $br ], r, c $regs, diag );
+                        }
+                    }
+                    else {
+                        for( ST ci=0; ci < mat_row.indices.size(); ++ci ) {
+                            ST c = mat_row.indices[ci]$dot_ind;
+                            if ( c > r )
+                                break;
+                            const typename RD::T *d = mat_row.data.data_ + $(lc.size) * ci;
+                            $init_reg
+                            push_( mat_row, res_row, res[ c / $br ], r, c $regs, diag );
+                            //
+                            if ( ci + 1 < mat_row.indices.size() ) {
+                                for( ST c = mat_row.indices[ci] + 1; c < std::min( r + 1, mat_row.indices[ci + 1] ); ++c ) {
+                                    $init_reg_z
+                                    push_( mat_row, res_row, res[ c / $br ], r, c $regs, diag );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+    #
+    def get_wanted_functions pertinence 3
+        return [
+            CppFunctionDescription( "chol", [ Ptr[ RD ], Ptr[ RD ], ST ] )
+        ]
+    
+    def get_control_sum pertinence 3
+        return last_modification_time_or_zero_of_file_named( __file_at_stack_level__(0) )
+
+
+#
+def chol( m, incomp = false ) when m.is_a_MatSparse pertinence 10
+    return CholMatSparse[ m.T, m.br, m.bc, m.nr, m.nc, m.ST, incomp ]( m )
+
+#
+def mul( m, v ) when m.is_a_CholMatSparse and v.tensor_order == 1 pertinence 20
+    T := type_promote( partial_instanciation v.T, partial_instanciation m.T, mul )
+    res := Vec[ T ]( v )
+    VecPartSparseSolveTri[ T, m.T, T, m.ST, m.br, m.bc, m.nr, m.nc, m.simd_size, true  ]( m, res )
+    VecPartSparseSolveTri[ T, m.T, T, m.ST, m.br, m.bc, m.nr, m.nc, m.simd_size, false ]( m, res )
+    return res
+
+# -----------------------------------------------------------------------------------------------------------------
+#
+class VecPartSparseSolveTri[ TR, TM, TV,  ST, br, bc, nr, nc, simd_size, inf ]
+    static const RD := MatPartSparseRowData[ TM, ST, br, bc, nr, nc, simd_size ]
+    static const nb_row_per_block := br * nr
+    static const nb_col_per_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    static const dot_ind := ".col" * several_blocks
+    static const type_solve := [ "sup", "inf" ][ inf ]
+    
+    static func := UntypedPtr( NULL )
+    static cpp_func ~= CppCompiledFunctionSet_
+        
+    mat_offset := ST( 0 )
+    vec_offset := ST( 0 )
+
+    def init( M, V )
+        init_using_default_values( self )
+        if not func
+            cpp_func.init( self )
+            func = cpp_func[ "solve_tri_$type_solve" ]
+        exec_ccode_function( func, V.get_begin(), M.rows.get_begin(), V.get_begin(), M.get_nb_rows(), mat_offset, vec_offset )
+
+    def get_src( stream )
+        assert( nr * nc == 1, "TODO : solve tri inf with several blocks" )
+        #
+        lc := MatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+        init_reg := ""
+        for r in 0 .. nb_row_per_block
+            init_reg << "T r_$(r) = vec[ r + $r ];\n        "
+            
+        finalize_diag := ""
+        for r in 0 .. nb_row_per_block
+            for c in 0 .. r
+                finalize_diag << "r_$(r) -= d[ $(lc.ind[ r, c ]) ] * r_$(c);\n        "
+            finalize_diag << "r_$(r) /= d[ $(lc.ind[ r, r ]) ];\n        "
+            finalize_diag << "res[ r + $r ] = r_$(r);\n        "
+                    
+        sub_reg := ""
+        for r in 0 .. nb_row_per_block
+            v := Vec[String]()
+            for c in 0 .. bc
+                v.push_back( "d[ $(lc.ind[r,c]) ] * res[ c + $c ]" )
+            sub_reg << "r_$(r) -= $(join( v, " + " ));\n            "
+                    
+                    
+        #
+        init_reg_diag := ""
+        for r in ( 0 .. br ).reversed
+            v := Vec[String]( [ "res[ r + $r ]" ] )
+            for c in r+1 .. br
+                v.push_back( "d[ $(lc.ind[c,r]) ] * res_$c" )
+            jv := join( v, " - " )
+            init_reg_diag << "T res_$r = ( $jv ) / d[ $(lc.ind[r,r]) ];\n        "
+            init_reg_diag << "res[ r + $r ] = res_$r;\n        "
+                
+        sub_reg_sup := ""
+        for r in 0 .. br
+            v := Vec[String]()
+            for c in 0 .. bc
+                v.push_back( "d[ $(lc.ind[c,r]) ] * res_$c" )
+            jv := join( v, " + " )
+            sub_reg_sup << "res[ c + $r ] -= $jv;\n            "
+                
+        #
+        stream <<<<
+            #include <iostream>
+            #include <cmath>
+            #include <assert.h>
+            #include <vector>
+            template<class T,class RD,class TV,class ST> void solve_tri_inf( T *res, RD *mat, TV *vec, ST size, ST mat_offset, ST vec_offset ) {
+                assert( mat_offset == 0 );
+                vec += vec_offset;
+                for( ST r = mat_offset; r < mat_offset + size; r += $br ) {
+                    $init_reg
+                    
+                    ST ci = 0;
+                    RD &mat_row = mat[ r / $br ];
+                    for( ; ci < mat_row.indices.size() and mat_row.indices[ci] < r; ++ci ) {
+                        ST c = mat_row.indices[ci]$dot_ind;
+                        const typename RD::T *d = mat_row.data.data_ + ci * $(lc.size);
+                        $sub_reg
+                    }
+                    
+                    // finalize
+                    const typename RD::T *d = mat_row.data.data_ + ci * $(lc.size);
+                    $finalize_diag
+                }
+            }
+            template<class T,class RD,class TV,class ST> void solve_tri_sup( T *res, RD *mat, TV *vec, ST size, ST mat_offset, ST vec_offset ) {
+                assert( mat_offset == 0 );
+                vec += vec_offset;
+                for( ST r = 0; r < size; ++r )
+                    res[ r ] = vec[ r ];
+                
+                for( ST r=mat_offset + size - $br; r >= mat_offset; r -= $br ) {
+                    RD &mat_row = mat[ r / $br ];
+                    ST ci = mat_row.indices.size() - 1;
+                    typename RD::T *d = mat_row.data.data_ + ci * $(lc.size);
+                    $init_reg_diag
+                    while ( true ) {
+                        if ( --ci < 0 ) break;
+                        ST c = mat_row.indices[ci]$dot_ind;
+                        typename RD::T *d = mat_row.data.data_ + ci * $(lc.size);
+                        $sub_reg_sup
+                    }
+                }
+            }
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "solve_tri_$type_solve", [ Ptr[TR], Ptr[ RD ], Ptr[ TV ], ST, ST, ST ] )
+        ]
+    
+    def get_control_sum
+        return last_modification_time_or_zero_of_file_named( __file_at_stack_level__(0) )
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+class MatPartSparseRowDataIndexCalculator[ bit_field, br, bc, nr, nc, simd_size ]
+    static nz := Mat[ Int32, Gen[ br * nr, bc * nc ] ]()
+    for ind, val in nz
+        rb := ind[0] // br
+        cb := ind[1] // bc
+        val = 2 * ( and_bitwise( bit_field, 2 ^ ( rb * nc + cb ) ) != 0 )
+    #
+    static ind := Mat[ Int32, Gen[ br * nr, bc * nc ] ]( default_value = -666 )
+    # try to put aligned data
+    static cpt := 0
+    for r in 0 .. br * nr
+        for c in range( begin = 0, increment = simd_size, end = bc * nc - simd_size + 1 )
+            if all( nz.row( r )[ c .. c + simd_size ] )
+                for i in 0 .. simd_size
+                    ind[ r, c + i ] = cpt++
+                    nz [ r, c + i ] = 1
+    # complete by non aligned data ( row ordered )
+    for c in 0 .. bc * nc
+        for r in 0 .. br * nr
+            if nz[ r, c ] == 2
+                ind[ r, c ] = cpt++
+                nz [ r, c ] = 1 
+    #
+    static size := ceil( cpt, simd_size )
+
+    static sorted_ind := Vec[ Vec[Int32,2] ]()
+    for i in 0 .. cpt
+        for ind, val in ind
+            if val == i
+                sorted_ind.push_back( ind )
+
+    #
+    def test
+        nr := 2; nc := 2
+        br := 3; bc := 3
+        simd_size := 2
+        for bit_field in 0 .. 2 ^ ( nr * nc )
+            lc := MatPartSparseRowDataIndexCalculator[ bit_field, br, bc, nr, nc, simd_size ]()
+            info bit_field
+            infon lc.ind
+    
+
+
+#~
+    A row of blocks of size [ br * nc, bc * nr ]
+    if nr * nc == 1
+        indices[i] = column // br of beginning of data[i] where data[i] is a block br * bc like
+            [ T_0 T_1 T_6 ]
+            [ T_2 T_3 T_7 ]
+            [ T_4 T_5 T_8 ] if A_i==1, with T_i a scalar of type T
+    else
+        indices = [ column // ( br * nr ), offset_in_data, bit_field ] * nb_block_set where
+            column -> ...
+            data[ offset_in_data ] -> beginning of T data
+            bit_field -> sum_rc A_rc 2^i where A_rc == 1 if br*bc block contains non zero entries
+~#
+class MatPartSparseRowData[ T, ST, br, bc, nr, nc, simd_size ]
+    class IndiceDataIfSeveralBlocks[ST]
+        col ~= ST # column
+        off ~= ST # offset_in_data
+        nze ~= ST # bit field for non zero entries
+    #
+    static const nb_row_per_block  := br * nr
+    static const nb_col_per_block  := bc * nc
+    static const T_alignement_byte := simd_size * T.byte_size
+    static const ID := [ ST, IndiceDataIfSeveralBlocks[ST] ][ nr * nc > 1 ] # indice data
+    static const default_lc := MatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+    static const default_block_size := default_lc.size
+    static const default_value := T( 0 )
+    
+    data    := Vec[ T, -1, ST, T_alignement_byte ]()
+    indices := Vec[ ID, -1, ST ]()
+
+    def select( r, c )
+        re := MatSparseDelayedAccess[ ST ]( self, r, c )
+        return re.var
+        
+    # returned by select()
+    class MatSparseDelayedAccess[ ST ]
+        vs := InternalVariable()
+        i := ST(0)
+        j := ST(0)
+        
+        def init( v, r, c )
+            vs.init_using_var( v )
+            i.init( r )
+            j.init( c )
+            
+        def get_var
+            cj := j // vs->nb_col_per_block
+            oj := j %  vs->nb_col_per_block
+            cj *= vs->nb_col_per_block
+            if vs->nr * vs->nc == 1
+                for cpt in 0 .. vs->indices.size
+                    if vs->indices[ cpt ] >= cj
+                        if vs->indices[ cpt ] == cj
+                            return vs->data[ cpt * vs->default_lc.size + vs->default_lc.ind[ i, oj ] ]
+                        return vs->default_value
+            else
+                for ind in vs->indices
+                    if ind.col >= cj
+                        if ind.col == cj
+                            lc := MatPartSparseRowDataIndexCalculator[ ind.nze, br, bc, nr, nc, simd_size ]()
+                            if lc.nz[ i, oj ]
+                                return vs->data[ ind.off + lc.ind[ i, oj ] ]
+                        return vs->default_value
+            return vs->default_value
+            
+        def reassign_var( v )
+            b := vs->block( j )
+            b[ i, j % vs->nb_col_per_block ] = v
+            
+        def init_var( v )
+            reassign_var( v )
+    
+    #
+    class Block[ T, bit_field, br, bc, nr, nc, simd_size ]
+        static lc := MatPartSparseRowDataIndexCalculator[ bit_field, br, bc, nr, nc, simd_size ]()
+        
+        data ~= Ptr[T]
+        
+        def reassign( v ) when v.tensor_order <= 0
+            for i in 0 .. lc.size
+                data[ i ] = v
+        
+        def select( r, c )
+            if lc.nz[ r, c ]
+                return data[ lc.ind[ r, c ] ]
+            return T( 0 )
+            
+        def __for__( block )
+            for r in 0 .. br * nr
+                for c in 0 .. bc * nc
+                    if lc.nz[ r, c ]
+                        block( ( [r,c], data[ lc.ind[ r, c ] ] ) )
+                    else
+                        block( ( [r,c], T(0) ) )
+                        
+    #
+    def block( j )
+        cj := j // nb_col_per_block
+        cj *= nb_col_per_block
+        if nr * nc == 1
+            for cpt in 0 .. indices.size
+                if indices[ cpt ] >= cj
+                    if indices[ cpt ] == cj
+                        return Block[ T, 1, br, bc, nr, nc, simd_size ]( data = data.begin + cpt * default_block_size )
+                    @indices.new_elem_at_position( cpt ) = cj
+                    res := Block[ T, 1, br, bc, nr, nc, simd_size ]( data = data.make_room_to_insert( cpt * default_block_size, default_block_size ) )
+                    res = 0
+                    return res
+            return push_block( j, 1 )
+        # several_blocks
+        for ind in indices
+            if ind.col >= cj
+                if ind.col == cj
+                    lc := MatPartSparseRowDataIndexCalculator[ ind.nze, br, bc, nr, nc, simd_size ]()
+                    return Block[ T, bit_field, br, bc, nr, nc, simd_size ]( data = &data[ ind.off ] )
+                assert( 0, "TODO" )
+        assert( 0, "TODO" )
+        return push_block( c, 1 )
+    
+    #
+    def push_block( col, bit_field )
+        assert( col % (bc*nc) == 0, "..." )
+        os  := data.size
+        res := Block[ T, bit_field, br, bc, nr, nc, simd_size ]()
+        if nr * nc == 1
+            indices.push_back( col )
+        else
+            indices.push_back( col = col, off = os, nze = bit_field )
+        data.resize( os + res.lc.size )
+        res.data = data.begin + os
+        res = 0
+        return res
+    
+    #
+    def get_additional_cpp_methods
+        args := Vec[String]( [ "ST row, ST col" ] )
+        for r in 0 .. br
+            for c in 0 .. bc
+                args.push_back( "T v_$(r)_$(c)" )
+        res := ""
+        res <<< "    void add( $(join(args,", ") ) ) {"
+        assert( nr * nc == 1, "TODO" )
+        res <<< "        for(unsigned i=0;i<indices.size();++i) {"
+        res <<< "            if ( indices[i] >= col ) {"
+        res <<< "                if ( indices[i] == col ) {"
+        lc := MatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+        res <<< "                    T *d = &data[ $( lc.size ) * i ];"
+        for r in 0 .. br
+            for c in 0 .. bc
+                res <<< "                    d[ $(lc.ind[ r, c ]) ] += v_$(r)_$(c);"
+        res <<< "                    return;"
+        res <<< "                }"
+        res <<< "                else { // creation"
+        res <<< "                    ST *ni = indices.make_room_to_insert( i, 1 ); *ni = col;"
+        res <<< "                    T *d = data.make_room_to_insert( $( lc.size ) * i, $( lc.size ) );"
+        for r in 0 .. br
+            for c in 0 .. bc
+                res <<< "                    d[ $(lc.ind[ r, c ]) ] = v_$(r)_$(c);"
+        res <<< "                    return;"
+        res <<< "                }"
+        res <<< "            }"
+        res <<< "        }"
+        res <<< "        *indices.new_elem() = col;"
+        res <<< "        ST os = data.size(); data.resize( os + $(lc.size) );"
+        for r in 0 .. br
+            for c in 0 .. bc
+                res <<< "        data[ os + $(lc.ind[ r, c ]) ] = v_$(r)_$(c);"
+        res <<< "    }"
+        
+        return res

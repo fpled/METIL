@@ -1,0 +1,68 @@
+//
+// C++ Interface: definitiondata
+//
+// Description:
+//
+//
+// Author: Hugo LECLERC <leclerc@lmt.ens-cachan.fr>, (C) 2006
+//
+// Copyright: See COPYING file that comes with this distribution
+//
+//
+#ifndef DEFINITIONDATA_H
+#define DEFINITIONDATA_H
+
+#include "nstring.h"
+#include "splittedvec.h"
+#include "tok.h"
+#include "type.h"
+#include "config.h"
+
+class SourceFile;
+struct DefTrial;
+struct Thread;
+
+/**
+	@author Hugo LECLERC <leclerc@lmt.ens-cachan.fr>
+*/
+struct DefinitionData {
+    static DefinitionData *make_new(unsigned nb_args,unsigned attributes);
+    DefinitionData *make_copy( Type *parent_type_ );
+    void destroy( Thread *th );
+    void inc_this_and_children_cpt_use();
+    
+    bool is_class() const { return attributes & Tok::Definition::CLASS; }
+    bool is_static() const { return attributes & Tok::Definition::STATIC; }
+    bool has_varargs() const { return attributes & Tok::Definition::VARARGS; }
+    bool has_self_as_arg() const { return attributes & Tok::Definition::SELF_AS_ARG; }
+    bool is_method() const { return attributes & Tok::Definition::METHOD; }
+    bool is_abstract() const { return attributes & Tok::Definition::ABSTRACT; }
+    void inc_ref() { ++cpt_use; }
+
+    unsigned offset_in_sar_file; /// from Tok::pos_...
+    unsigned attributes; /// from Tok::Definition::...
+    const char *doc; /// from Tok::Definition::...
+    CppThreadTryFunc *cpp_thread_try_func;
+    const void *try_block; /// from Tok::Definition::...
+    const void *block; /// from Tok::Definition::...
+    SourceFile *sourcefile; /// 
+    unsigned size_needed_in_stack;
+    
+    
+    Nstring name;
+    Nstring property_name;
+    Float64 pertinence;
+    unsigned min_nb_args;
+    unsigned nb_args;
+    Type *parent_type; // type of parent class if method (used if virtual)
+    
+    SplittedVec<Type *,2,8> type_cache; /// only for classes
+
+    DefinitionData *next_with_same_name;
+    unsigned cpt_use;
+    
+    Nstring args[1];
+};
+
+
+#endif

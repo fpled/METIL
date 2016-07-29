@@ -1,0 +1,46 @@
+
+def mpi_send( ptr, size, dest, tag ) # ptr.type != UntypedPtr
+    return mpi_send( ptr.ptr, size * ptr.T.byte_size_if_in_vec, dest, tag )
+
+def mpi_recv( ptr, size, src, tag ) # ptr.type != UntypedPtr
+    return mpi_recv( ptr.ptr, size * ptr.T.byte_size_if_in_vec, src, tag )
+
+def mpi_send( ptr, size, dest, tag ) when __is_a_Property__(ptr) or __is_a_Property__(size) or __is_a_Property__(dest) or __is_a_Property__(tag) pertinence -2
+    return mpi_send( get_value_prop ptr, get_value_prop size, get_value_prop dest, get_value_prop tag )
+
+def mpi_recv( ptr, size, src, tag ) when __is_a_Property__(ptr) or __is_a_Property__(size) or __is_a_Property__(dest) or __is_a_Property__(tag) pertinence -2
+    return mpi_recv( get_value_prop ptr, get_value_prop size, get_value_prop src, get_value_prop tag )
+
+class MpiProcess
+    property is_a_MpiProcess
+    rank := 0
+    tag := 0
+    
+    def init( r ) when r.is_a_number
+        rank.init( r )
+    
+    def write( ptr, size )
+        mpi_send( ptr, size, rank, tag )
+    
+    def read
+        buf := String( reservation = 2048 )
+        s := mpi_recv( buf.data_, buf.reserved_, rank, tag )
+        buf.size = s
+        return buf
+    
+    def read_object
+        bds := BinDeSerializer( self )
+        for o in bds
+            return o
+        return none
+    
+    def send_object( object )
+        bs := BinSerializer()
+        bs.append( object )
+        bs.write_to_stream( self )
+    
+    
+def shift_left( mpi_process, object ) when mpi_process.is_a_MpiProcess
+    mpi_process.send_object( object )
+    return mpi_process
+    

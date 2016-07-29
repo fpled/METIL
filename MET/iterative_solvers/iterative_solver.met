@@ -1,0 +1,182 @@
+import "orthogonalizer.met"
+import "projector.met"
+#~
+== Iterative Solver ==
+*solves constrained system
+** $\begin{pmatrix} oper & G \\ G^T & 0 \end{pmatrix} \begin{pmatrix} sol \\ y_g \end{pmatrix} =
+\begin{pmatrix} rhs \\ e_g \end{pmatrix}$
+** with preconditioner $prec$
+** with augmentation $C$
+*only needs few high level algebraic operations (products and transpositions)
+*constraints are stored and handled using [[Projectors]]
+~#
+class IterativeSolver[ TA, TPC, T, ST, TVECLIST = MatVecList[T] ]
+    static const Tvec := LazyVec
+    nb_iteration_min := 0
+    nb_iteration_max := Int32::max_representable
+    nb_iteration_stagnation := 100 # nb iteration ...
+    iter := 0
+    convergence_criterion := T(0)
+    oper := InternalVariable()
+    prec := InternalVariable()
+    sol := Tvec()
+    rhs := Tvec()
+    y_g := Tvec()
+    e_g := Tvec() 
+    PG := Projector[ T , TPC, false ]()
+    PC := Projector[ T , TA, true ]()
+    #
+    # Basic initialization, creation of projectors
+    def init( A, M, G_ = TVECLIST(), C_=TVECLIST() , M_ = M )
+        init_using_default_values( self )
+        oper.init_using_var( A )
+        prec.init_using_var( M )
+        sol.init( size = oper->nb_rows, default_value = T( 0 ) )
+        rhs.init( size = oper->nb_cols, default_value = T( 0 ) )
+        y_g.init( size = G_.nb_cols, default_value = T( 0 ) )
+        e_g.init( size = G_.nb_cols, default_value = T( 0 ) )
+        PG.init( M_ , G_ )
+        PC.init( A , PG * C_ )
+    #
+    # Adapt initialization to constraints
+    def correct_initial_value()
+        if PG.C.nb_cols > 0
+            sol = ( PG * sol ) + ( PG.AC * ( @PG.coarse_matrix * e_g ) )
+        #            info ( PG.C' * sol ) - e_g
+        if PC.C.nb_cols > 0
+            sol = ( PC * sol ) + ( PC.C * ( @PC.coarse_matrix * ( PC.C' * rhs ) ) )
+    # Compute the complete solution (participation of the constraints)
+    #
+    def complete_solution()
+        if PG.C.nb_cols > 0
+            y_g = @PG.coarse_matrix * ( PG.AC' * (rhs - @oper * sol) )
+    #
+    # Small routine to verify the quality of the solution
+    def verify_solution()
+        tmp := @oper * sol - rhs
+        tmp2 := Vec[T]()
+        if PG.C.nb_cols > 0 
+            tmp += PG.C * y_g
+            tmp2 = PG.C' * sol
+            stdout <<< "Absolute error on the verification of the constraint $(norm_2( tmp2 ))"
+        stdout <<< "Absolute error of the complete solution $(norm_2( tmp ))"
+
+
+#~
+=== Krylov solvers === 
+These solvers are characterized by the storage of the subspace, and the need to do orthogonalizations with respect to this subspace. See [Saad:iterative] [Parlet:templates]
+~#
+class KrylovSolver[ TA, TPC, T, ORTHOGONALIZER = ModifiedGramSchmidt, ST = TA::ST ] inherits IterativeSolver[ TA, TPC, T, ST ]
+    subspace := ORTHOGONALIZER[T]()
+
+#~
+====  Conjugate Gradient ==== 
+* properties
+** to use in the case of symetric definite positive operator and preconditioner
+** slight non-positivity of the operator can be tolerated
+* options
+** if the problem is kind short orthogonalization is possible
+~#
+class ConjugateGradient[ TA, TPC, T, ORTHOGONALIZER = ClassicalGramSchmidt, ST = TA::ST ] inherits KrylovSolver[ TA, TPC, T, ORTHOGONALIZER[normalized = true, euclidian = false], ST ]
+    def solve()
+        correct_initial_value()
+        res := Tvec()
+        res.init( size = oper->nb_cols, default_value = T( 0 ) )
+        res = PG' * ( rhs - @oper * sol ) # @optimize if &PG.A == prec then PG' = identity
+        prec_res := PC * ( PG * ( @prec * res ) )
+        a_research_direction := PG' * ( @oper * prec_res )
+        a_norm := dot( a_research_direction, prec_res )
+        stdout<<"Initialization, abs. oper. norm of the prec. residual = "<<< a_norm
+        if a_norm < convergence_criterion 
+            stdout<<<"Convergence during initialization"
+            complete_solution()
+            break
+        subspace.add_vec( prec_res, a_research_direction, a_norm )
+        alpha := dot( prec_res, res ) / subspace.norm_list.last_item
+        iter = 0
+        while not iter < nb_iteration_min and not iter >= nb_iteration_max
+            sol += alpha * subspace.vec_list.last_item
+            res -= alpha * a_research_direction
+            prec_res = PC * ( PG * ( @prec * res ) )
+            subspace.orthogonalize(prec_res)
+            a_research_direction = PG' * ( @oper * prec_res )
+            a_norm = dot( a_research_direction, prec_res )
+            stdout<<"Iteration "<<iter<<", abs. oper. norm of the prec. residual = "<<< a_norm
+            if a_norm < convergence_criterion break
+            subspace.add_vec( prec_res, a_research_direction, a_norm )
+            alpha = dot( prec_res, res ) / subspace.norm_list.last_item
+            iter++
+        complete_solution()
+
+#~
+==== GMRes solver ====
+* properties
+** suited to any invertible matrix
+* options 
+** if orthogonalization takes too much time use restarted algorithm @todo
+~#
+class GMRes[ TA, TPC, T, ORTHOGONALIZER = ClassicalGramSchmidt, ST = TA::ST ] inherits KrylovSolver[ TA, TPC , T, ORTHOGONALIZER[ euclidian = true, normalized = true ], ST ]
+    def solve()
+        correct_initial_value()
+        v := LazyVec( PC * (PG * (@prec * ( PG' * (rhs - @oper * sol)))) )
+        beta := Vec[T]( size = subspace.ortho_keep + 10 )
+        givens := Vec[T]( size = subspace.ortho_keep + 10 )
+        hessem := Mat[T,TriSup](subspace.ortho_keep) ; hessem = 0
+        beta[0] = norm_2(v)
+        stdout<<"Initialization, abs. eucl. norm of the prec. residual = "<<< beta[0]
+        if beta[0] < convergence_criterion 
+            complete_solution()
+            stdout<<"Convergence during initialization"
+            break
+        v /= beta[0]
+        subspace.add_vec( v )
+        iter = 0
+        ratio := T(1)
+        subterm := T(0)
+        while ratio > convergence_criterion
+            v = PC * (PG * ( @prec * ( PG' * (@oper * v )))) # @optimize if &PG.oper = prec then PG' = Id.
+            vt := Vec[T]()
+            subspace.orthogonalize(v,vt)
+            for i in 0..iter+1
+                # info i, iter
+                # info hessem.nb_rows
+                # info hessem.nb_cols
+                # info vt.size
+                hessem[i,iter] = vt[i]
+            subterm = norm_2( v )
+            v /= subterm
+            subspace.add_vec( v )
+            subd ~=Ptr[T]
+            for i in 0..iter+1
+                if i==iter
+                    subd = pointer_on(subterm)
+                    givens[iter] = hessem[iter,iter] / sqrt(hessem[iter,iter]^2 + subterm^2)
+                else 
+                    subd = pointer_on(hessem[i+1,iter])
+                tp1 := hessem[i,iter]
+                tp2 := @subd 
+                hessem[i,iter] = tp1 * givens[i] + tp2 * sqrt(1-givens[i]^2)
+                @subd = -tp1 * sqrt (1-givens[i]^2) + tp2 * givens[i]
+            beta[iter+1] = -beta[iter] * sqrt(1-givens[iter]^2)
+            beta[iter] *= givens[iter]
+            ratio *= abs(sqrt(1-givens[iter]^2))
+            stdout <<< "Iteration $iter, GMRes residual $ratio"
+            iter++
+        #computation of the solution
+        hessem2 := Mat[T,TriSup](hessem[0..iter])
+        beta2 := Vec[T](beta[0..iter])
+        y := hessem2 \ beta2
+        sol += subspace * y
+        complete_solution()
+
+def conjugate_gradient( m, pc, g, c, pp = pc, T = m.get_best_type() )
+    return ConjugateGradient[ type_of(m), type_of(pc), T ]( m, pc, g, c, pp )
+    
+def gmres( m, pc, g = MatVecList[m.get_best_type()](), c = MatVecList[m.get_best_type()](), pp = pc, T = m.get_best_type() )
+    return GMRes[ type_of(m), type_of(pc), T ]( m, pc, g, c, pp )
+
+#~
+@todo BiCG
+@todo accelerations for a sequence of linear systems
+~#
+

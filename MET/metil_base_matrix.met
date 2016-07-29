@@ -1,0 +1,1302 @@
+import "MatSparse.met"
+
+## Structure for class Mat ##
+class Gen[ static_nb_rows = -1, static_nb_cols = static_nb_rows, ST = Int32 ]
+    static const known_nb_rows := static_nb_rows >= 0
+    static const known_nb_cols := static_nb_cols >= 0
+    static const default_nb_rows := ST( static_nb_rows * known_nb_rows )
+    static const default_nb_cols := ST( static_nb_cols * known_nb_cols )
+    static const known_nb_values  := known_nb_rows and known_nb_cols
+    static const static_nb_values := ST( ( -1, static_nb_rows * static_nb_cols )[ known_nb_values ] )
+    static const is_diag := false
+    static const is_sym := false
+    static const need_lower_part := true
+    static const need_upper_part := true
+    static const need_diag_part := true
+
+    def init( r=default_nb_rows, c=default_nb_cols ) when r.is_a_number
+        nb_rows_.init_value( r )
+        nb_cols_.init_value( c )
+    def extract_val_from_dense_matrix( data, r, c, simd_compatible, simd_size )
+        if simd_compatible and simd_size > 1
+            al := simd_size - 1
+            c_limit := and_bitwise( nb_cols_.val, ~al )
+            if c >= c_limit
+                return data[ c_limit * nb_rows_.val + ( c - c_limit ) * nb_rows_.val + r ]
+            return data[ r * c_limit + c ]
+        return data[ r * nb_cols_.val + c ]
+    def get_nb_rows        return nb_rows_.val
+    def get_nb_cols        return nb_cols_.val
+    def get_nb_values      return nb_rows_.val * nb_cols_.val
+    def __for__( block )
+        for i in 0 .. nb_rows_.val
+            for j in 0 .. nb_cols_.val
+                block( ( i, j ) )
+    def resize( nb_rows, nb_cols, data, default_value )
+        data.resize( nb_rows * nb_cols )
+        if nb_cols != nb_cols_.val
+            for r in ( 0 .. nb_rows_.val ).reversed
+                for c in 0 .. nb_cols_.val
+                    data[ r * nb_cols + c ] = data[ r * nb_cols_.val + c ]
+                for c in nb_cols_.val .. nb_cols
+                    data[ r * nb_cols + c ].init( default_value )
+        for r in nb_rows_.val .. nb_rows
+            for c in 0 .. nb_cols
+                data[ r * nb_cols + c ].init( default_value )
+        nb_rows_.reassign_value( nb_rows ); nb_cols_.reassign_value( nb_cols )
+    def get_transpose_type
+        return Gen[ static_nb_cols, static_nb_rows, ST ]
+    nb_rows_ := StaticValIf[ known_nb_rows, static_nb_rows, ST ]()
+    nb_cols_ := StaticValIf[ known_nb_cols, static_nb_cols, ST ]()
+
+## Structure for class Mat ##
+class Sym[ static_size = -1, ST = Int32 ]
+    static const known_nb_rows := static_size >= 0
+    static const known_nb_cols := static_size >= 0
+    static const default_nb_rows := ST( static_size * known_nb_rows )
+    static const default_nb_cols := ST( static_size * known_nb_cols )
+    static const known_nb_values  := known_nb_rows
+    static const static_nb_values := ST( ( -1, ( static_size * ( static_size + 1 ) ) // 2 )[ known_nb_values ] )
+    static const static_nb_rows := static_size
+    static const static_nb_cols := static_size
+    static const is_diag := false
+    static const is_sym := true
+    static const need_lower_part := true
+    static const need_upper_part := false
+    static const need_diag_part := true
+
+    def init( r=default_nb_rows, c=default_nb_cols ) when r.is_a_number
+        assert( r==c, "with square Structure ($(self.type)) nb_rows must be equal to nb_cols" )
+        size_.init_value( r )
+    def extract_val_from_dense_matrix( data, r, c, simd_compatible, simd_size )
+        if r < c
+            return extract_val_from_dense_matrix( data, c, r, simd_compatible, simd_size )
+        return data[ (r * ( r + 1 )) // 2 + c ]
+    def get_nb_rows        return size_.val
+    def get_nb_cols        return size_.val
+    def get_nb_values      return ( size_.val * ( size_.val + 1 ) ) // 2
+    def __for__( block )
+        for i in 0 .. size_.val
+            for j in 0 .. i+1
+                block( ( i, j ) )
+    def resize( nb_rows, nb_cols, data, default_value )
+        assert( nb_rows==nb_cols, "resize sym like matrix with nb_rows!=nb_cols" )
+        data.resize( nb_rows * ( nb_rows + 1 ) / 2 )
+        for i in size_.val * ( size_.val + 1 ) / 2 .. nb_rows * ( nb_rows + 1 ) / 2
+            data[i].init( default_value )
+        size_.reassign_value( nb_rows )
+    def get_transpose_type
+        return Sym[ static_size, ST ]
+
+    size_ := StaticValIf[ known_nb_rows, static_size, ST ]()
+
+## Structure for class Mat ##
+class TriSup[ static_size = -1, ST = Int32 ] inherits Sym[ static_size, ST ]
+    static const is_diag := false
+    static const is_sym := false
+    def extract_val_from_dense_matrix( data, r, c, simd_compatible, simd_size ) pertinence 2
+        if r <= c
+            return data[ (c * ( c + 1 )) // 2 + r ]
+        return 0
+    def __for__( block ) pertinence 2
+        for i in 0 .. size_.val
+            for j in 0 .. i+1
+                block( ( j, i ) )
+    def get_transpose_type
+        return TriInf[ static_size, ST ]
+
+## Structure for class Mat ##
+class TriInf[ static_size = -1, ST = Int32 ] inherits Sym[ static_size, ST ]
+    static const is_diag := false
+    static const is_sym := false
+    def extract_val_from_dense_matrix( data, r, c, simd_compatible, simd_size ) pertinence 2
+        if r >= c
+            return data[ (r * ( r + 1 )) // 2 + c ]
+        return 0
+    def get_transpose_type
+        return TriSup[ static_size, ST ]
+
+## Structure for class Mat ##
+class Diag[ static_size = -1, ST = None, default_value = 0 ] inherits Sym[ static_size, ST ]
+    static const is_diag := true
+    static const is_sym := true
+    def extract_val_from_dense_matrix( data, r, c, simd_compatible, simd_size ) pertinence 1.1
+        if r != c
+            return data.T( default_value )
+        return data[ r ]
+    def get_transpose_type
+        return Diag[ static_size, ST, default_value ]
+
+## ##
+class Dense[ simd_compatible = true, simd_size = 0 ]
+    toto := 0
+    
+# -----------------------------------------------------------------------------------------------------------------------------------
+def ml_div( M, V ) when M.tensor_order == 2 and M.Structure == TriInf and V.tensor_order == 1
+    T := type_promote_list( [ M.T ], V.sub_types, mul, add )
+    res := Vec[T]( V )
+    for r in 0 .. a.nb_rows
+        res[r] -= M[r,r] * ( V[r] - dot( M[r,0..r], res[0..r] ) )
+    return res
+    
+# def ml_div( M, V ) when M.tensor_order == 2 and M.structure == TriSup and V.tensor_order == 1
+    # tmpvec := res
+    # for c in ( 0 .. a.nb_cols ).reversed
+        # tmp := tmpvec[ c ] * a.fact[ c, c ]
+        # for i in 0 .. c
+            # tmpvec[ i ] -= a.fact[ c, i ] * tmp
+        # res[ c ] = tmp
+    # return res
+    
+
+# -----------------------------------------------------------------------------------------------------------------------------------
+class ColOrRowExtraction[ ST, want_row ]
+    static const tensor_order := 1
+    property is_a_vector
+    m := InternalVariable() # 
+    r := ST()
+    
+    def init( mat, n )     m.init_using_var( mat ); r.init( n )
+    def get_size
+        if want_row
+            return m->nb_cols
+        return m->nb_rows
+    def get_sizes
+        return [get_size()]
+    def get_sub_types      return m->sub_types
+    def reassign( vec ) when vec.tensor_order == 1
+        for v, c in vec, 0...
+            select( c ) = v
+    def reassign( v ) when v.tensor_order <= 0
+        for c in self
+            c = v
+    def select( c ) when c.tensor_order <= 0
+        if want_row
+            return m->select( r, c )
+        return m->select( c, r )
+    def __for__( block )
+        if want_row
+            for c in ST(0) .. m->nb_cols
+                block( m->select( r, c ) )
+        else
+            for c in ST(0) .. m->nb_rows
+                block( m->select( c, r ) )
+
+class DiagExtraction[ ST ]
+    static const tensor_order := 1
+    property is_a_vector
+    m := InternalVariable() # 
+    
+    def init( mat, pouet ) m.init_using_var( mat )
+    def reassign( vec ) when vec.tensor_order == 1
+        for v, c in vec, ST(0)...
+            m->select( c, c ) = v
+    def reassign( val )
+        for c in ST(0) .. m->nb_cols
+            m->select( c, c ) = val
+    def get_size           return m->nb_cols
+    def get_sub_types      return m->sub_types
+    def select( c ) when c.tensor_order <= 0 
+        return m->select( c, c )
+    def __for__( block )
+        for c in ST(0) .. m->nb_rows
+            block( m->select( c, c ) )
+
+
+# -----------------------------------------------------------------------------------------------------------------------------------
+
+## used by Mat[...] but also by MatOp and MatCst  ... ##
+class MatAncestor
+    static const is_a_matrix := true
+    static const tensor_order := 2
+    
+    def write_to_stream( stream ) # stdout << mat
+        if stream.options.fancy
+            m := Mat[ String ]( nb_rows, nb_cols )
+            for row in 0 .. nb_rows
+                for col in 0 .. nb_cols
+                    m[ row, col ].init( select( row, col ) )
+            vs := Vec[ Int32 ]( size = nb_cols, default_value = 1 )
+            for row in 0 .. nb_rows
+                for col in 0 .. nb_cols
+                    vs[ col ] = max( vs[ col ], m[ row, col ].size )
+            for row in 0 .. nb_rows
+                for col in 0 .. nb_cols
+                     stream << select( row, col ) + " " * ( 1 + vs[ col ] - m[ row, col ].size )
+                stream << "\n"
+        else
+            for row in 0 .. nb_rows
+                for col in 0 .. nb_cols
+                    stream << select( row, col ) << stream.options.separators[0]
+                stream << stream.options.separators[1]
+    def get_sizes
+        return [get_nb_rows(),get_nb_cols()]
+    def row( n )
+        return ColOrRowExtraction[ ST, want_row = true  ]( self, n )
+    def col( n )
+        return ColOrRowExtraction[ ST, want_row = false ]( self, n )
+    def select( vec, val ) when vec.tensor_order == 1 pertinence 2
+        return ColOrRowExtraction[ ST, want_row = false ]( self, val )[ vec ]
+    def select( val, vec ) when vec.tensor_order == 1 pertinence 2
+        return ColOrRowExtraction[ ST, want_row = true  ]( self, val )[ vec ]
+    def select( v1 , v2  ) when v1.tensor_order == 1 and v2.tensor_order == 1 pertinence 3
+        return SubMatExtraction[ST]( self, v1, v2 )
+    def select( v1  ) when v1.tensor_order == 1
+        return select( v1[0], v1[1] )
+        # return SubMatExtraction[ST]( self, v1, v1 )
+    def apply( x, y )
+        return select( x, y )
+    def get_diag
+        return DiagExtraction[ ST ]( self, 120 )
+    def reassign( val ) when val.tensor_order <= 0
+        for row in 0 .. nb_rows
+            for col in 0 .. nb_cols
+                select( row, col ) = val
+    def reassign_values( val )
+        for d in data
+            d = val
+    def partial_det( rows, cols ) # rows.size must be == to cols.size
+        if rows.size == 1
+            return select( rows[0], cols[0] )
+        res := T(0)
+        r := Vec[ ST, rows.static_size-1 ]()
+        c := Vec[ ST, cols.static_size-1 ]()
+        for nr in ST(0) .. rows.size
+            r = rows[0..nr] +++ rows[nr+1..rows.size]
+            for nc in ST(0) .. cols.size
+                c = cols[0..nc] +++ cols[nc+1..cols.size]
+                res += ( 2 * and_bitwise( nr+nc, 1 ) - 1 ) *  partial_det( r, c )
+        return res
+    def get_det pertinence -1
+        assert( nb_rows==nb_cols, "matrix determinant can be calculated only with square ones." )
+        if structure.is_diag
+            return reduction( diag, mul, T(0) )
+        V := Vec[ ST, static_nb_rows ]
+        return partial_det( V( 0..nb_rows ), V( 0..nb_cols ) )
+    def solve( vec )
+        TR := type_promote( type_promote_list( vec.sub_types, [T], div ).map( partial_inst ), reassign )
+        if structure.is_diag
+            return Vec[ TR, static_nb_rows ]( get_diag() / vec )
+            
+        # gauss pivot
+        m := Mat[ T, Gen[ static_nb_rows, static_nb_cols ] ]( self )
+        vec_sol := Vec[ TR, static_nb_rows ]( vec )
+        # factorization -> upper triangular matrix
+        pivot := Vec[ ST, static_nb_rows ]( 0 .. nb_rows )
+        for r in ST(0) .. nb_rows
+            # pivot choice
+            pc := r
+            for r2 in r+1 .. nb_rows
+                if assumed( abs( m[ pivot[r2], r ] ) > abs( m[ pivot[pc], r ] ) )
+                    pc = r2
+            swap( pivot[r], pivot[pc] )
+            pc = pivot[r]
+            # Li -= Lj * ...
+            pv := inv( m[ pc, r ] )
+            for r2 in r+1 .. nb_rows
+                coeff := m[ pivot[r2], r ] * pv 
+                for c in 0 .. nb_rows
+                    m[ pivot[r2], c ] -= coeff * m[ pc, c ]
+                vec_sol[ pivot[r2] ] -= coeff * vec_sol[ pc ]
+        # solve using triangular matrix
+        for r in ( ST(0) .. nb_rows ).reversed
+            for c in r+1 .. nb_rows
+                vec_sol[ r ] -= vec_sol[ c ] * m[ r, c ]
+            vec_sol[ r ] /= m[ r, r ]
+        return vec_sol
+        
+    def get_is_diag
+        return Structure::is_diag
+        
+    def get_is_sym
+        return Structure::is_sym
+        
+    def get_is_sym_rt # runtime test
+        if Structure::is_sym
+            return true
+        if get_nb_rows() != get_nb_cols()
+            return false
+        for i in 0 .. get_nb_rows()
+            for j in 0 .. i
+                if not assumed( select(i,j) == select(j,i) )
+                    return false
+        return true
+        
+    def get_is_diag_rt # runtime test
+        if Structure::is_diag
+            return true
+        if Structure::is_sym
+            for i in 0 .. get_nb_rows()
+                for j in 0 .. i
+                    if not assumed( select(i,j) == select(j,i) )
+                        return false
+        else
+            for i in 0 .. get_nb_rows()
+                for j in 0 .. i
+                    if not assumed( select(i,j) == 0 )
+                        return false
+                for j in i+1 .. get_nb_cols()
+                    if not assumed( select(i,j) == 0 )
+                        return false
+        return true
+        
+    def get_is_herm_rt
+        for i in 0 .. get_nb_rows()
+            for j in 0 .. i
+                if not assumed( select(i,j) == select(j,i)' )
+                    return false
+        return true
+        
+    def __for__( block ) pertinence 0
+        for i in 0 .. get_nb_rows()
+            for j in 0 .. get_nb_cols()
+                block( make_varargs( [i,j], select(i,j) ) )
+
+#~ ~#
+class SimpleMatStructure
+    is_sym  := false
+    is_diag := false
+    
+#~ ~#
+class SubMatExtraction[ ST ] inherits MatAncestor
+    m := InternalVariable() # 
+    v1 := InternalVariable() # 
+    v2 := InternalVariable() # 
+    structure := SimpleMatStructure()
+    
+    def init( mat, vec1, vec2 )
+        m.init_using_var( mat )
+        v1.init_using_var( vec1 )
+        v2.init_using_var( vec2 )
+        structure.is_sym  = mat.structure.is_sym  and ( vec1 == vec2 )
+        structure.is_diag = mat.structure.is_diag and ( vec1 == vec2 )
+    def reassign( mat ) when mat.tensor_order == 2
+        for r in ST(0) .. nb_rows
+            for c in ST(0) .. nb_cols
+                m->select( v1->select(r), v2->select(c) ) = mat[ r, c ]
+    def get_nb_rows        return v1->size
+    def get_nb_cols        return v2->size
+    def get_sub_types      return m->sub_types
+    def select( r, c ) 
+        return m->select( v1->select(r), v2->select(c) )
+    def get_T
+        return m->T
+    def get_static_nb_rows
+        return m->static_nb_rows
+    def get_static_nb_cols
+        return m->static_nb_cols
+    def get_Storage
+        return m->Storage
+                
+## basic matrix, dense case ##
+class Mat[ T, Structure = Gen, Storage = Dense, ST = SizeType ] when Storage == Dense inherits MatAncestor
+    property has_for_with_index_and_values
+    structure := Structure[ ST = ST ]()
+    data := Vec[ T, structure.static_nb_values, ST ]()
+    storage := Storage()
+    static const simd_compatible := storage.simd_compatible
+    static const simd_size := storage.simd_size or default_simd_size( T )
+    static const known_nb_values := structure.known_nb_values
+    static const sub_types := [ T ]
+    static const static_nb_rows := structure.static_nb_rows
+    static const static_nb_cols := structure.static_nb_cols
+    static const has_static_sizes := static_nb_rows >= 0 and static_nb_cols >= 0
+    static const static_sizes := [ static_nb_rows, static_nb_cols ]
+    static def EqTypeWithScalarType( TO ) return Mat[ TO, Structure, Storage, ST ]
+    
+    # def init( nb_rows = structure.default_nb_rows, nb_cols = structure.default_nb_cols ) when nb_rows.tensor_order<=0 pertinence 2
+        # structure.init( nb_rows, nb_cols )
+        # data.init( size = structure.nb_values )
+        
+    def init( nb_rows = Structure::default_nb_rows, nb_cols = Structure::default_nb_cols or nb_rows, default_value = T() ) when nb_rows.tensor_order<=0 pertinence 2
+        structure.init( nb_rows, nb_cols )
+        data.init( size = structure.nb_values, default_value = default_value )
+        storage.init()
+    
+    def init( nb_rows = Structure::default_nb_rows, nb_cols = Structure::default_nb_cols or nb_rows, function = ( v => 0 ) ) pertinence 1
+        structure.init( nb_rows, nb_cols )
+        data.init( size = structure.nb_values )
+        for i in 0 .. nb_rows
+            for j in 0 .. nb_cols
+                select( i, j ).init( function( [i j] ) )
+    
+    def init( default_value ) when known_nb_values pertinence 3
+        structure.init( nb_rows, nb_cols )
+        data.init( size = structure.nb_values, default_value = default_value )
+        
+    def init( function ) when known_nb_values pertinence 3
+        structure.init()
+        data.init( size = structure.nb_values )
+        for i in 0 .. nb_rows
+            for j in 0 .. nb_cols
+                select( i, j ).init( function( [i j] ) )
+    
+    def init( m ) when m.tensor_order == 2 pertinence 4
+        init( m.nb_rows, m.nb_cols )
+        # info m.type
+        # info m[0,0].type
+        # interact
+        for r, c in structure
+            self[ r, c ].init( m[ r, c ] )
+    
+    def reassign( m ) when m.is_a_matrix pertinence 3
+        structure.resize( m.nb_rows, m.nb_cols, data, T(0) ) # TODO -> meaning of 0
+        for r, c in structure
+            self[ r, c ] = m[ r, c]
+            
+    def get_nb_rows      return structure.nb_rows
+    def get_nb_cols      return structure.nb_cols
+    def get_nb_values    return structure.nb_values
+    def get_values       return data
+    def select( i, j )   return structure.extract_val_from_dense_matrix( data, i, j, simd_compatible, simd_size )
+    def select( i )      return data[ i ]
+    def resize( nr, nc = nr, default_value = T() ) structure.resize( nr, nc, data, default_value )
+
+    def without_row( nr )
+        res := Mat[ T, Gen[ max(static_nb_rows-1,-1), static_nb_cols ], Storage, ST ]( nb_rows - 1, nb_cols )
+        for c in 0 .. nb_cols
+            for r in 0 .. nr
+                res[ r  , c ] = self[ r, c ]
+            for r in nr + 1 .. nb_rows
+                res[ r-1, c ] = self[ r, c ]
+        return res
+    
+    def without_col( nc )
+        res := Mat[ T, Gen[ static_nb_rows, max(static_nb_cols-1,-1) ], Storage, ST ]( nb_rows, nb_cols - 1 )
+        for r in 0 .. nb_rows
+            for c in 0 .. nc
+                res[ r, c   ] = self[ r, c ]
+            for c in nc + 1 .. nb_cols
+                res[ r, c-1 ] = self[ r, c ]
+        return res
+    
+    def get_additional_cpp_methods
+        res := ""
+        if Structure == Gen
+            al := simd_size - 1
+            res <<< "    ST index( ST r, ST c ) const {"
+            if al
+                res <<< "        ST c_limit = structure.nb_cols_.val & ~$al;"
+                res <<< "        if ( c >= c_limit )"
+                res <<< "            return c_limit * structure.nb_rows_.val + ( c - c_limit ) * structure.nb_rows_.val + r;"
+            else
+                res <<< "        ST c_limit = structure.nb_cols_.val;"
+            res <<< "        return r * c_limit + c;"
+            res <<< "    }"
+            res <<< "    const T &operator()( ST r, ST c ) const { return data[ index( r, c ) ]; }"
+            res <<< "    T &operator()( ST r, ST c ) { return data[ index( r, c ) ]; }"
+        else if Structure == Sym
+            res <<< "    const T &operator()( ST r, ST c ) const { if (c>r) return operator()( c, r ); return data[ ( r * ( r + 1 ) ) / 2 + c ]; }"
+            res <<< "    T &operator()( ST r, ST c ) { if (c>r) return operator()( c, r ); return data[ ( r * ( r + 1 ) ) / 2 + c ]; }"
+        #
+        return res
+# ## make an array from a LittleHeterogeneousArray ##
+# def dyn_mat( data ) when have_same_name( type_of(data), LittleHeterogeneousArray )
+    # if data.values.nb_unnamed_arguments() == 0  return VoidArray()
+    # assert( data.sizes.size == 2, "matrix can be defined from arrays of tensor_order 2 only (tensor_order of data = $(data.tensor_order))." )
+    # res := Mat[ type_promote( data.values, reassign ), Gen, Dense ]( data.sizes[0], data.sizes[1] )
+    # for i, j in zip( res.data.data, data.values )  i = j
+    # return res
+
+# ## make an array from a LittleHeterogeneousArray ##
+# def stat_mat( data ) when have_same_name( type_of(data), LittleHeterogeneousArray )
+    # if data.values.nb_unnamed_arguments() == 0  return VoidArray()
+    # assert( data.sizes.size == 2, "matrix can be defined from arrays of tensor_order 2 only (tensor_order of data = $(data.tensor_order))." )
+    # res := Mat[ type_promote( data.values, reassign ), Gen[data.sizes[0],data.sizes[1]], Dense ]()
+    # for i, j in zip( res.data.data, data.values )  i = j
+    # return res
+
+def get_det( self ) when self.tensor_order == 2
+    assert( self.sizes[0]==self.sizes[1], "det for non square matrix" )
+    s := self.sizes[0]
+    T := self.T
+    if s==0
+        return T(0)
+    if s==1
+        return self[0,0]
+    if s==2
+        return self[0,0] * self[1,1] - self[1,0] * self[0,1]
+    if s==3
+        return self[0,0] * ( self[1,1] * self[2,2] - self[2,1] * self[1,2] ) - 
+               self[1,0] * ( self[0,1] * self[2,2] - self[2,1] * self[0,2] ) +
+               self[2,0] * ( self[0,1] * self[1,2] - self[1,1] * self[0,2] )
+    # else
+    s_i := lu( self )
+    return s_i.det
+    #
+    def make_test
+        t := Tensor[Float64,[3,3]]( x => randf() )
+        infon t
+        info t.det
+        popen( "octave -q", "w" ) <<< "t = [$t];" <<< "det(t)"
+
+# inverse of a tiny matrix (rank 1, 2, 3, ...)
+def inv_tiny( mat, d = mat.get_det() ) when mat.tensor_order == 2
+    if mat.nb_rows == 1
+        return Mat[ mat.T, Gen[1,1] ]( default_value = 1 / d )
+    res := Mat[ mat.T, Gen[mat.nb_rows,mat.nb_cols] ]()
+    for i in 0 .. mat.nb_rows
+        Ac := mat.without_row(i)
+        for j in 0 .. mat.nb_cols
+            Ad := Ac.without_col(j)
+            res[j,i] = ( 1 - 2 * and_bitwise(i+j,1) ) * Ad.get_det() / d
+    return res
+    #
+    def test
+        m := Mat[ Float64, Gen[3,3] ]( function = x => randf() )
+        infon m
+        infon inv_tiny( m )
+        infon inv_tiny( m ) * [ 10 20 30 ]
+    
+
+def get_eig_poly( self ) when self.tensor_order == 2
+    assert( self.sizes[0] == self.sizes[1], "eig vals with non square matrix." )
+    s := self.sizes[0]; T := self.T
+    if s==0
+        return Poly[ T, s ]()
+    if s==1
+        return Poly[ T, s ]( self[0,0], -1 )
+    if s==2
+        return Poly[ T, s ]( self[0,0] * self[1,1] - self[1,0] * self[0,1], - self[1,1] - self[0,0], 1 )
+    if s==3
+        return Poly[ T, s ]([
+            self[0,0]*(self[1,1]*self[2,2]-self[2,1]*self[1,2])-self[1,0]*(self[0,1]*self[2,2]-self[2,1]*self[0,2])+self[2,0]*(self[0,1]*self[1,2]-self[1,1]*self[0,2]),
+            (-1)*self[1,1]*self[2,2]+self[2,1]*self[1,2]+self[0,0]*((-1)*self[2,2]-self[1,1])+self[1,0]*self[0,1]+self[2,0]*self[0,2],
+            (1.0/2.0)*(2*self[2,2]+2*self[1,1]+2*self[0,0]),
+            -1
+        ])
+
+def get_eig_values( self ) when self.tensor_order == 2
+    assert( self.sizes[0] == self.sizes[1], "eig vals with non square matrix." )
+    s := self.sizes[0]
+    if s==0  return []
+    if s==1  return [ self[0,0] ]
+    return self.eig_poly.roots.map( x => x[0] )
+    
+    #
+    def make_c
+        l := symbol("l")
+        for n in 3..4
+            info n
+            t := Tensor[Op,[n,n]]( x => symbol("self[$(x[0]),$(x[1])]") - l*(x[0]==x[1]) )
+            p := Poly[Op,n]( op = t.det, var = l )
+            for c in p.coeffs info c
+    #
+    def make_test
+        t := Tensor[Float64,[2,2]]( x => randf() )
+        infon t
+        info t.det, t.eig_values
+        popen( "octave -q", "w" ) <<< "t = [$t];" <<< "det(t)" <<< "eig(t)"
+    
+def get_eig( self ) when self.tensor_order == 2
+    const T := self.T
+    const st := self.static_nb_rows
+    s := self.nb_rows
+    val := self.eig_values
+    vec := Vec[ Vec[T,st], st ]()
+    cpt := 0
+    for v in val
+        #
+        qr_dec := qr( self - v * identity( s ) )
+        md := max( qr_dec.R.diag )
+        infon qr_dec.Q_unnormed
+        infon qr_dec.R
+        infon self - v * identity( s )
+        infon qr_dec.Q_unnormed' * qr_dec.Q_unnormed
+        infon qr_dec.Q_unnormed * qr_dec.R
+        infon md
+        # if qr_dec.R[0,0]
+        #
+        # vec[cpt].init( sum( trials ) )
+        # vec[cpt] /= norm_2( vec[cpt] )
+        # cpt++
+        # info m
+    return ( val, vec )
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+## Ex :  ##
+class MatOp inherits MatAncestor
+    static const ST := SizeType
+    
+    op := InternalVariable() # we don't use Def because interpreter would be confused about store_in_inst and so on
+    va := VarArgs() # arrays
+    
+    def init( function, varargs ) when varargs.size assert(varargs.size,"pouet"); op.init_using_var( function ); va.init( varargs )
+    def get_nb_rows         return va[0].nb_rows
+    def get_nb_cols         return va[0].nb_cols
+    def get_static_nb_rows  return va[0].static_nb_rows
+    def get_static_nb_cols  return va[0].static_nb_cols
+    def get_known_nb_values return all( va.map( _0.known_nb_values ) )
+    def select( i, j )
+        v := VarArgs(); for mat in va v.push_unnamed( mat[i,j] )
+        return call_with_return( @op, v )
+    def conversion_to( b ) when is_of_type_Bool(b) and @op == equal
+        b.init( all( self ) )
+    def conversion_to( b ) when is_of_type_Bool(b)
+        assert( 0, "Direct conversion of a vector to a Bool is illegal. One should use an operator like 'any', 'all'..." )
+        b.init( Error() )
+    def get_data
+        res := VecOp()
+        res.op.init_using_var( @op )
+        res.va = va.map( _0.data )
+        return res
+    def get_sub_types
+        if va.size == 1
+            return va[0].sub_types # TODO -> op
+        if va.size == 2 # TODO -> several subtypes
+            assert( va[0].sub_types.size == 1, "TODO" )
+            assert( va[1].sub_types.size == 1, "TODO" )
+            return [ type_promote( partial_instanciation va[0].sub_types[0], partial_instanciation va[1].sub_types[0], @op ) ]
+        assert( 0, "TODO" )
+    def get_T
+        if va.size == 1
+            return va->T # TODO: take op into account !!!!!
+        if va.size == 2
+            return type_promote( partial_instanciation va[0].T, partial_instanciation va[1].T, @op )
+        assert( 0, "TODO" )
+        
+## general definition of map ##
+def map( self, function ) when self.is_a_matrix
+    res := MatOp()
+    res.op.init_using_var( function )
+    res.va.push_unnamed( self )
+    return res
+
+
+## array with all identical values ##
+class MatCst
+    static const is_a_matrix := true
+    static const known_nb_values := false
+    
+    sizes_ := InternalVariable()
+    val := InternalVariable()
+    
+    def init( s, value )        sizes_.init_using_var( s ); val.init_using_var( value )
+    def select( i,j )           return @val
+    def get_data                return VecCst( product( @sizes_ ), @val )
+    def get_nb_rows             return sizes_->select(0)
+    def get_nb_cols             return sizes_->select(1)
+    def get_sub_types           return [ val->type ]
+    def get_T                   return type_of( @val )
+    
+## ##
+def mat_cst( sizes, val )  return MatCst( sizes, val )
+    
+# -----------------------------------------------------------------------------------------------------------------------------------
+def mul( mat, vec ) when mat.is_a_matrix and vec.tensor_order==1 pertinence 4
+    assert( mat.sub_types.size == 1 and vec.sub_types.size == 1, "TODO" )
+    # TR := type_promote( type_promote_list( mat.sub_types, vec.sub_types, mul ).map( partial_inst ), reassign )
+    TR := type_promote( partial_instanciation vec.T, partial_instanciation mat.T, div )
+    res := Vec[ TR, mat.static_nb_rows ]( size = mat.nb_rows )
+    for r in mat.ST(0) .. res.size
+        res[r].init( dot( mat.row(r), vec, TR(0) ) )
+    return res
+
+def mul( vec, mat ) when mat.is_a_matrix and vec.tensor_order==1 pertinence 4
+    # assert( mat.sub_types.size == 1 and vec.sub_types.size == 1, "TODO" )
+    TR := type_promote( type_promote_list( mat.sub_types, vec.sub_types, mul ).map( partial_inst ), reassign )
+    res := Vec[ TR, mat.static_nb_cols ]( size = mat.nb_rows )
+    for c in mat.ST(0) .. res.size
+        res[c].init( dot( mat.col(c), vec, TR(0) ) )
+    return res
+
+# -----------------------------------------------------------------------------------------------------------------------------------
+# class MatMult[ST] inherits MatAncestor
+    # m1 := InternalVariable() #
+    # m2 := InternalVariable() #
+    
+    # def init( m1_, m2_ )     m1.init_using_var( m1_ ); m2.init_using_var( m2_ )
+    # def get_nb_rows          return m1->nb_rows
+    # def get_nb_cols          return m2->nb_cols
+    # def get_known_nb_values  return m1->known_nb_rows and m2->known_nb_cols
+    # def select( i, j )       return dot( m1->row(i), m2->col(j) )
+    # def get_sub_types        return type_promote( type_promote_list( m1->sub_types, m1->sub_types, mul ).map( partial_inst ), add )
+    
+# def mul( m1, m2 ) when m1.is_a_matrix and m2.is_a_matrix pertinence 4
+    # return MatMult[ type_promote( partial_instanciation m1.ST, partial_instanciation m2.ST, add ) ]( m1, m2 )
+    
+    
+def mul( m1, m2 ) when m1.is_a_matrix and m2.is_a_matrix pertinence 4
+    ST := type_promote( partial_instanciation m1.ST, partial_instanciation m2.ST, add )
+    TR := type_promote( type_promote_list( m1.sub_types, m2.sub_types, mul ).map( partial_inst ), add )
+    GE := [ Gen[ m1.static_nb_rows, m2.static_nb_cols ], Sym[ m1.static_nb_rows ] ][ m1.structure.is_sym and m2.structure.is_sym ]
+    res := Mat[ TR, GE, ST = ST ]( m1.nb_rows, m2.nb_cols )
+    for r in 0 .. m1.nb_rows
+        for c in 0 .. m2.nb_cols
+            res[ r, c ] = dot( m1.row( r ), m2.col( c ) )
+    return res
+
+def add( m1, m2 ) when m1.is_a_matrix and m2.is_a_matrix pertinence 4
+    assert( m1.nb_rows == m2.nb_rows and m1.nb_cols == m2.nb_cols, "sum of matrices with != sizes if forbidden ( $(m1.nb_rows)x$(m2.nb_rows) and $(m1.nb_cols)x$(m2.nb_cols) )" )
+    ST := type_promote( partial_instanciation m1.ST, partial_instanciation m2.ST, add )
+    TR := type_promote( type_promote_list( m1.sub_types, m2.sub_types, add ).map( partial_inst ), add )
+    GE := [ Gen[ m1.static_nb_rows, m1.static_nb_cols ], Sym[ m1.static_nb_rows ] ][ m1.structure.is_sym and m2.structure.is_sym ]
+    res := Mat[ TR, GE, ST = ST ]( m1.nb_rows, m1.nb_cols )
+    for r in 0 .. m1.nb_rows
+        for c in 0 .. m1.nb_cols
+            res[ r, c ] = m1[ r, c ] + m2[ r, c ]
+    return res
+
+def sub( m1, m2 ) when m1.is_a_matrix and m2.is_a_matrix pertinence 4
+    assert( m1.nb_rows == m2.nb_rows and m1.nb_cols == m2.nb_cols, "sum of matrices with != sizes if forbidden ( $(m1.nb_rows)x$(m2.nb_rows) and $(m1.nb_cols)x$(m2.nb_cols) )" )
+    ST := type_promote( partial_instanciation m1.ST, partial_instanciation m2.ST, add )
+    TR := type_promote( type_promote_list( m1.sub_types, m2.sub_types, sub ).map( partial_inst ), sub )
+    GE := [ Gen[ m1.static_nb_rows, m1.static_nb_cols ], Sym[ m1.static_nb_rows ] ][ m1.structure.is_sym and m2.structure.is_sym ]
+    res := Mat[ TR, GE, ST = ST ]( m1.nb_rows, m1.nb_cols )
+    for r in 0 .. m1.nb_rows
+        for c in 0 .. m1.nb_cols
+            res[ r, c ] = m1[ r, c ] - m2[ r, c ]
+    return res
+
+# scalar * matrix
+def mul( s, m ) when m.is_a_matrix and s.tensor_order <= 0 pertinence 4
+    ST := m.ST
+    TR := type_promote( type_promote_list( [s.type], m.sub_types, mul ).map( partial_inst ), reassign )
+    res := Mat[ TR, m.Structure, ST = ST ]( m.nb_rows, m.nb_cols )
+    for r in 0 .. m.nb_rows
+        for c in 0 .. m.nb_cols
+            res[ r, c ] = s * m[ r, c ]
+    return res
+
+# matrix * scalar
+def mul( m, s ) when m.is_a_matrix and s.tensor_order <= 0 pertinence 4
+    return s * m
+
+# matrix / scalar
+def div( m, s ) when m.is_a_matrix and s.tensor_order <= 0 pertinence 4
+    ST := m.ST
+    TR := type_promote( type_promote_list( [s.type], m.sub_types, div ).map( partial_inst ), reassign )
+    res := Mat[ TR, m.Structure, ST = ST ]( m.nb_rows, m.nb_cols )
+    for r in 0 .. m.nb_rows
+        for c in 0 .. m.nb_cols
+            res[ r, c ] = m[ r, c ] / s
+    return res
+
+
+# -----------------------------------------------------------------------------------------------------------------------------------
+def ml_div( mat, vec )
+    # if mat.nb_rows <= 4
+        # return inv_tiny( mat ) * stat_vec( vec )
+        # return Vec[ type_promote(partial_instanciation mat.T,partial_instanciation vec.T,div) ]( inv_tiny( mat ) * vec )
+    return lu( mat ) * vec # mat.solve( vec )
+
+
+# def doubledot( m1, m2 ) when m1.tensor_order==2 and m2.tensor_order==2
+    # assert( m1.sub_types.size == 1, "TODO" )
+    # assert( m2.sub_types.size == 1, "TODO" )
+    # T := type_promote( partial_instanciation m1.sub_types[0], partial_instanciation m2.sub_types[0], mul )
+    # res := T( 0 )
+    # for r in 0 .. m1.nb_rows
+        # for c in 0 .. m1.nb_cols
+            # res += m1[r,c] * m2[r,c]
+    # return res
+
+def doubledotdot( m1, m2 ) when m1.tensor_order == 3 and m1.tensor_order == 3
+    res := type_promote( partial_instanciation m1.T, partial_instanciation m2.T, mul )( 0 )
+    assert( 0, "TODO" )
+    return res
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+class LU_matrix[ T, Storage, static_size, ST ]
+    property is_a_LU_matrix
+    fact := Mat[ T, Gen[static_size,static_size], Storage, ST ]()
+    use_eqz := 0
+    
+    def init( mat, assume_lu_factorizable = false ) when mat.is_a_matrix
+        fact.init( mat.nb_rows, mat.nb_cols )
+        use_eqz = not assume_lu_factorizable
+        for row in ST(0) .. mat.nb_rows
+            # L
+            for col in ST(0) .. row
+                tmp := mat[ row, col ]
+                tmp -= dot( fact[ 0..col, col ], fact[ row, 0..col ] )
+                d := fact[ col, col ]
+                fact[ row, col ] = tmp / ( d + eqz(d) * use_eqz ) * ( 1 - eqz(d) * use_eqz )
+            # U
+            for col in ST(0) .. row+1
+                tmp := mat[ col, row ]
+                tmp -= dot( fact[ 0..col, row ], fact[ col, 0..col ] )
+                fact[ col, row ] = tmp
+
+    def get_nb_rows
+        return fact.nb_rows
+    def get_nb_cols
+        return fact.nb_cols
+    def get_det
+        return product( fact.diag )
+        
+def mul( a, b ) when a.is_a_LU_matrix and b.tensor_order == 1 pertinence 20
+    assert( b.size <= a.nb_rows, "rhs.size (=$(b.size)) is < matrix.nb_rows (=$(a.nb_rows))" )
+    T := type_promote_list( [a.T], b.sub_types, mul, add )
+    res := Vec[T]( b )
+    # L
+    for r in 0 .. a.nb_rows
+        res[r] -= dot( a.fact[r,0..r], res[0..r] )
+    # U
+    for c in ( 0 .. a.nb_cols ).reversed
+        d := a.fact[c,c]
+        res[c] /= ( d + eqz(d) * a.use_eqz )
+        res[0..c] -= a.fact[0..c,c] * res[c]
+    return res
+
+def lu( mat, assume_lu_factorizable = false ) when mat.tensor_order == 2
+    TR := mat.T
+    if ( partial_instanciation TR ).is_an_integer_number
+        TR = Rationnal
+    return LU_matrix[ TR, mat.Storage, mat.static_nb_rows, mat.ST ]( mat, assume_lu_factorizable )
+    # def test_lu
+        # m := Mat[ Rationnal ]( nb_rows = 15, nb_cols = 15, function = ( x => rand()%10000 ) )
+        # infon m # infon lu( m ).fact
+        # v := lu( m ) * (0..15)
+        # infon m * v
+
+def inv( m, def_pos = true ) when m.is_a_matrix and m.structure.is_diag==false and ( m.structure.is_sym==false or def_pos==false )
+    return lu( m )
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+class Chol_matrix[ T, Storage, static_size, ST ]
+    property is_a_Chol_matrix
+    fact := Mat[ T, Sym[static_size], Storage, ST ]()
+    
+    def init( mat ) when mat.is_a_matrix
+        fact.init( mat )
+        for row in ST(0) .. mat.nb_rows
+            for col in ST(0) .. row
+                fact[ row, col ] = fact[ col, col ] * ( mat[ row, col ] - dot( fact[ col, 0..col ], fact[ row, 0..col ] ) )
+            fact[ row, row ] = 1 / sqrt( mat[ row, row ] - sum( fact[ row, 0..row ] ^ 2 ) )
+
+    def get_nb_rows
+        return fact.nb_rows
+    def get_nb_cols
+        return fact.nb_cols
+    def get_det
+        return product( fact.diag ) ^ 2
+        
+def mul( M, V ) when M.is_a_Chol_matrix and V.tensor_order == 1 pertinence 20
+    T := type_promote_list( [ M.T ], V.sub_types, mul, add )
+    res := Vec[T]( size = V.size )
+    for r in 0 .. M.fact.nb_rows
+        res[r] = M.fact[r,r] * ( V[r] - dot( M.fact[r,0..r], res[0..r] ) )
+    #
+    tmpvec := res
+    for c in ( 0 .. M.fact.nb_cols ).reversed
+        tmp := tmpvec[ c ] * M.fact[ c, c ]
+        for i in 0 .. c
+            tmpvec[ i ] -= M.fact[ c, i ] * tmp
+        res[ c ] = tmp
+    return res
+
+def mul( M, V ) when M.is_a_Chol_matrix and V.tensor_order == 2 pertinence 20
+    T := type_promote_list( [ M.T ], V.sub_types, mul, add )
+    res := Mat[T]( V.nb_rows, V.nb_cols )
+    for c in 0 .. res.nb_cols
+        res[ 0..., c ] = M * V[ 0..., c ]
+    return res
+
+
+def chol( mat ) when mat.tensor_order == 2
+    TR := mat.T
+    if ( partial_instanciation TR ).is_an_integer_number
+        TR = Rationnal
+    return Chol_matrix[ TR, mat.Storage, mat.static_nb_rows, mat.ST ]( mat )
+
+#
+def inv( m, def_pos = true ) when m.is_a_matrix and m.structure.is_sym and def_pos
+    return chol( m )
+    
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+class QR_unnormed_matrix[ T, static_size, ST ]
+    property is_a_QR_unnormed_matrix
+    Q_unnormed := Mat[ T, Gen[ static_size, static_size ] ]() # Q = Q_unnormed * MatDiag( 1 / sqrt( Q_norms_2 ) )
+    Q_norms_2 := Vec[ T, static_size ]()
+    Q_norms_2_nz := Vec[ T, static_size ]()
+    R_unnormed := Mat[ T, TriSup[ static_size ] ]() # R = mat_diag( 1 / sqrt( qr_dev.Q_norms_2 ) ) * R_unnormed
+    
+    def init( mat ) when mat.is_a_matrix
+        s := mat.nb_rows
+        Q_unnormed.init( mat.nb_rows, mat.nb_cols, default_value = T() )
+        Q_norms_2.init( size = mat.nb_rows )
+        Q_norms_2_nz.init( size = mat.nb_rows )
+        
+        for c in ST(0) .. mat.nb_cols
+            Q_unnormed.col( c ) = mat.col( c )
+            for i in 0 .. c
+                Q_unnormed.col( c ) -= Q_unnormed.col( c ) * Q_norms_2_nz[i] - dot( Q_unnormed.col( i ), Q_unnormed.col( c ) ) * Q_unnormed.col( i )
+            Q_norms_2[ c ].init( dot( Q_unnormed.col( c ), Q_unnormed.col( c ) ) )
+            Q_norms_2_nz[ c ].init( Q_norms_2[ c ] + ( abs( Q_norms_2[ c ] ) < 100*(T::epsilon) ) )
+        R_unnormed.init( Q_unnormed' * mat )
+        
+    def get_mat_norms
+        return mat_diag( 1 / sqrt( Q_norms_2 ) )
+    
+    def get_nb_rows
+        return Q_unnormed.nb_rows
+        
+    def get_nb_cols
+        return Q_unnormed.nb_cols
+        
+    def get_det
+        return mul( R_unnormed.diag )
+        
+def mul( a, b ) when a.is_a_QR_unnormed_matrix and b.tensor_order == 1 pertinence 20
+    assert( false and b.size <= a.nb_rows, "rhs.size (=$(b.size)) is < matrix.nb_rows (=$(a.nb_rows))" )
+    return 0
+
+def qr_unnormed( mat ) when mat.tensor_order == 2
+    return QR_unnormed_matrix[ mat.T, mat.static_nb_rows, mat.ST ]( mat )
+
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+class IdentityMatrix[ T = Void, ST = SizeType ] inherits MatAncestor
+    static const is_identity_for_mul := true
+    static const known_nb_values := false
+    static const Structure := Diag[ST=ST]
+    
+    size := ST(0)
+    # def det
+        # assert(0,"TODO")
+    def solve( vec )
+        assert(0,"TODO")
+    def select( r, c ) return T( r == c )
+    def get_nb_rows    return size
+    def get_nb_cols    return size
+
+def get_is_identity_for_mul( self )
+    return false
+
+def mul( m, v ) when m.is_identity_for_mul and v.tensor_order==1 pertinence 10
+    return v
+
+def identity( nb_rows, T = Int32 )
+    return IdentityMatrix[ T ]( size = nb_rows )
+
+##
+    ...
+##
+def identity_matrix( TM, nb_rows = TM::static_nb_rows, nb_cols = nb_rows )
+    res := TM()
+    res = 0
+    res.diag = 1
+    return res
+
+##
+##    
+def trace( m ) when m.is_a_matrix pertinence 10
+    return sum( m.diag )
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+class MatTrans[ST] inherits MatAncestor
+    property is_a_MatTrans
+    
+    mat := InternalVariable() #
+    
+    def init( m )            mat.init_using_var( m )
+    def get_nb_rows          return mat->nb_cols
+    def get_nb_cols          return mat->nb_rows
+    def get_static_nb_rows   return mat->static_nb_cols
+    def get_static_nb_cols   return mat->static_nb_rows
+    def get_known_nb_values  return mat->known_nb_values
+    def get_T                return mat->T
+    def select( i, j )       return conj( mat->select( j, i ) )
+    def conversion_to( b ) when is_of_type_Bool(b) and @op == equal
+        mat->conversion_to( b )
+    def conversion_to( b ) when is_of_type_Bool(b)
+        assert( 0, "Direct conversion of a vector to a Bool is illegal. One should use an operator like 'any', 'all'..." )
+        b.init( Error() )
+    def get_data             return mat->data
+    def get_sub_types        return mat->sub_types
+    
+## general definition of map ##
+# def trans( m ) when m.is_a_matrix
+    # return MatTrans[ m.ST ]( m )
+
+def trans( m ) when m.is_a_matrix pertinence 4
+    res := Mat[ m.T, m.structure.transpose_type, ST = m.ST ]( m.nb_cols, m.nb_rows )
+    for r in 0 .. m.nb_rows
+        for c in 0 .. m.nb_cols
+            res[ c, r ] = m[ r, c ]
+    return res
+
+# sym part of m
+def sym_part( m ) when m.is_a_matrix pertinence 4
+    res := ( m + trans( m ) ) / 2
+    return res
+
+# anti sym part of m
+def asym_part( m ) when m.is_a_matrix pertinence 4
+    res := ( m - trans( m ) ) / 2
+    return res
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+class MatDiag inherits MatAncestor
+    static const ST := SizeType
+    
+    vec := InternalVariable() #
+    
+    def init( v )            vec.init_using_var( v )
+    def get_nb_rows          return vec->size
+    def get_nb_cols          return vec->size
+    def get_known_nb_values  return vec->known_nb_values
+    def select( i, j )       return ( i == j ) * vec->select( i )
+    def get_data             return @vec
+    def get_sub_types        return vec->sub_types
+    
+## general definition of map ##
+def mat_diag( v ) when v.tensor_order == 1
+    return MatDiag( v )
+
+
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+#~
+    Column storage matrix, aka multivector
+~#
+class MatVecList[ ST = SizeType ] inherits MatAncestor
+    property is_a_MatVecList
+    static const known_nb_values := false
+    static const static_nb_rows := -1
+    static const static_nb_cols := -1
+    data := SplittedVec[LazyVec,4]()
+    #
+    def get_nb_cols                       return data.size
+    def get_nb_rows                       return data[0].size
+    def get_sizes                         return [get_nb_rows(),get_nb_cols()]
+    def select( i, j )                    return data[j][i]
+    def push_back(v)                      return data.push_back(v)
+    def select(i) when i.tensor_order<=0  return data[i]
+    def __for__(block)                    data.__for__(block)
+    def get_last_item                     return data.last_item
+    def col(i) pertinence 2               return data[i] 
+    #
+    def mul(v) when v.tensor_order == 1
+        out := LazyVec( size = data[0].size, default_values = 0 )
+        for i in 0..data.size
+            out += v[i] * data[i]
+#
+def mul(a,b) when ( b.is_a_MatVecList and not ( a.is_a_MatTrans and a.mat->is_a_MatVecList) ) pertinence 5
+    out := b
+    for w in out 
+        w = a*w
+    return out
+
+#
+def mul(a,b) when ( b.is_a_MatVecList and a.is_a_MatTrans and a.mat->is_a_MatVecList ) pertinence 5
+    out := LazyMat[ ST = b.ST ]()
+    s := new LazyMatPartOperatorMulMatVecList[ Float64, b.ST ]( nb_rows = a.mat->nb_cols, nb_cols = b.nb_cols )
+    # dependencies
+    
+    for lv in a.mat->data
+        for sv in lv.sub_vecs
+            s.add_child( sv )
+    for lv in b.data
+        for sv in lv.sub_vecs
+            s.add_child( sv )
+    
+    s.a->init_using_var( a )
+    s.b->init_using_var( b )
+    
+    out.set_sub_block( 0, 0, s )
+    return out
+
+#
+class LazyMatPartOperatorMulMatVecList[ T, ST ] inherits LazyMatPartFull[ T, ST ]
+    a := InternalVariable()
+    b := InternalVariable()
+
+    def init( nr, nc )
+        init_lazy_obj()
+        nb_rows = nr
+        nb_cols = nc
+    
+    virtual def evaluate
+        for i in 0 .. nb_rows
+            for j in 0 .. nb_cols
+                self[i,j] = dot( a->mat->col(i), b->col(j) ) 
+    
+    virtual def write_to_stream( stream )
+        stream << "MulMatVecList"
+    
+    
+#~
+    M = [ 2,1 1,3 ]
+    V = [ 1 7 ]
+    
+    S := Mat[ Op ]()
+    F := Vec[ Op ]()
+    shur( M, V, [ 1 ], S, F )
+    
+    info M \ V
+    info S \ F
+~#
+def shur( M, V, indices, S, F, solver )
+    T := M.T
+    neg_ind := Vec[ Int32 ]()
+    for i in 0 .. M.nb_rows
+        if not ( i in indices )
+            neg_ind.push_back( i )
+    A := M[ indices, indices ]
+    B := M[ indices, neg_ind ]
+    C := M[ neg_ind, indices ]
+    D := M[ neg_ind, neg_ind ]
+    a := V[ indices ]
+    b := V[ neg_ind ]
+    fact := solver( D )
+    S = A - B * ( fact * C )
+    F = a - B * ( fact * b )
+    
+
+#~
+~#
+def tensorial_product( a, b ) when a.is_a_vector and b.is_a_vector
+    T := type_promote( partial_instanciation a.T, partial_instanciation b.T, mul )
+    res := Mat[ T ]( a.size, b.size )
+    for r in 0 .. a.size
+        for c in 0 .. b.size
+            res[ r, c ] = a[ r ] * b[ c ]
+    return res
+    
+#~
+~#
+class GlTransformation[ T = Float64 ]
+    data := Mat[ T, Gen[4,4] ]()
+
+    def select( i, j )
+        return data[ i, j ]
+
+    def select( i )
+        return data.data[ i ]
+
+    static def identity
+        res := GlTransformation[ T ]()
+        for i in 0 .. 4
+            for j in 0 .. 4
+                res[ i, j ] = ( i == j )
+        return res
+        
+    static def homothetie( v )
+        res := GlTransformation[ T ]()
+        for i in 0 .. 4
+            for j in 0 .. 4
+                res[ i, j ] = ( i == j ) * ( i >= 3 or v[i] )
+        return res
+    
+    static def translation( v )
+        res := GlTransformation[ T ]()
+        for i in 0 .. 3
+            for j in 0 .. 4
+                res[ i, j ] = ( i == j ) + ( j == 3 ) * v[i]
+        for j in 0 .. 4
+            res[ 3, j ] = ( 3 == j )
+        return res
+    
+    static def plane_symetry( point, normal_ )
+        normal := normal_ / length( normal_ )
+        
+        res := GlTransformation[ T ]()
+        dotpn := dot( point, normal )
+        for i in 0 .. 3
+            res[ i, 3 ] = 2 * dotpn * normal[ i ]
+        for i in 0 .. 3
+            for j in 0 .. 3
+                res[ i, j ] = ( i == j ) - 2 * normal[j] * normal[i]
+        for j in 0 .. 3
+            res[ 3, j ] = 0
+        res[ 3, 3 ] = 1
+        return res
+    
+    static def rotation( val_ )
+        res := GlTransformation[ T ]()
+        angle := norm_2( val_ )
+        if assumed( angle == 0 )
+            return identity()
+        info ( angle == 0 )
+        val := val_ / ( angle + ( angle == 0 ) )
+        sa := sin( angle )
+        ca := cos( angle )
+        n0 := val[0] * sa
+        n1 := val[1] * sa
+        n2 := val[2] * sa
+        res[0,0]=ca   res[0,1]=-n2  res[0,2]=n1  res[0,3]=0
+        res[1,0]=n2   res[1,1]=ca   res[1,2]=-n0 res[1,3]=0
+        res[2,0]=-n1  res[2,1]=n0   res[2,2]=ca  res[2,3]=0
+        res[3,0]=0    res[3,1]=0    res[3,2]=0   res[3,3]=1
+        for i in 0 .. 3
+            for j in 0 .. 3
+                res[ i, j ] += val[i] * val[j] * ( 1.0 - ca )
+        return res
+    
+    static def rotation( val, center )
+        res := rotation( val )
+        for i in 0 .. 3
+            res[ i, 3 ] = center[ i ]
+            for j in 0 .. 3
+                res[ i, 3 ] -= res[ i, j ] * center[ j ]
+        return res
+    
+    static def perspective( znear, ratio )
+        res := identity()
+        res[ 3, 2 ] = ratio
+        res[ 3, 3 ] = - ratio * znear + 1
+        return res
+    
+    static def new_axis( X, Y, Z )
+        res := GlTransformation[ T ]()
+        for i in 0 .. 3
+            res[ 0, i ] = X[i]
+            res[ 1, i ] = Y[i]
+            res[ 2, i ] = Z[i]
+            res[ 3, i ] = 0
+            res[ i, 3 ] = 0
+        res[ 3, 3 ] = 1
+        return res
+
+    def inverse
+        res := GlTransformation[ T ]()
+        reg0:=data[14]*data[9]; reg1:=data[13]*data[10]; reg1=reg0-reg1; reg0=data[7]*reg1; reg2:=data[15]*data[10];
+        reg3:=data[14]*data[11]; reg3=reg2-reg3; reg2=data[5]*reg3; reg4:=data[15]*data[9]; reg5:=data[11]*data[13];
+        reg5=reg4-reg5; reg4=data[6]*reg5; reg4=reg2-reg4; reg4=reg0+reg4; reg0=data[0]*reg4;
+        reg2=data[14]*data[8]; reg6:=data[12]*data[10]; reg6=reg2-reg6; reg2=reg6*data[7]; reg7:=data[4]*reg3;
+        reg8:=data[8]*data[15]; reg9:=data[12]*data[11]; reg9=reg8-reg9; reg8=reg9*data[6]; reg8=reg7-reg8;
+        reg8=reg2+reg8; reg2=reg8*data[1]; reg2=reg0-reg2; reg0=data[4]*reg5; reg7=reg9*data[5];
+        reg7=reg0-reg7; reg0=data[8]*data[13]; reg10:=data[12]*data[9]; reg10=reg0-reg10; reg0=reg10*data[7];
+        reg0=reg7+reg0; reg7=reg0*data[2]; reg7=reg2+reg7; reg2=reg10*data[6]; reg11:=data[4]*reg1;
+        reg12:=data[5]*reg6; reg12=reg11-reg12; reg12=reg2+reg12; reg2=data[3]*reg12; reg2=reg7-reg2;
+        res[0]=reg4/reg2; reg4=data[1]*reg3; reg7=data[2]*reg5; reg7=reg4-reg7; reg4=data[3]*reg1;
+        reg4=reg7+reg4; reg4=reg4/reg2; res[1]=-reg4; reg4=data[14]*data[5]; reg7=data[6]*data[13];
+        reg7=reg4-reg7; reg4=data[3]*reg7; reg11=data[6]*data[15]; reg13:=data[14]*data[7]; reg13=reg11-reg13;
+        reg11=data[1]*reg13; reg14:=data[5]*data[15]; reg15:=data[13]*data[7]; reg15=reg14-reg15; reg14=data[2]*reg15;
+        reg14=reg11-reg14; reg14=reg4+reg14; res[2]=reg14/reg2; reg4=data[5]*data[10]; reg11=data[6]*data[9];
+        reg11=reg4-reg11; reg4=data[3]*reg11; reg14=data[6]*data[11]; reg16:=data[7]*data[10]; reg16=reg14-reg16;
+        reg14=data[1]*reg16; reg17:=data[5]*data[11]; reg18:=data[9]*data[7]; reg18=reg17-reg18; reg17=data[2]*reg18;
+        reg17=reg14-reg17; reg17=reg4+reg17; reg17=reg17/reg2; res[3]=-reg17; res[8]=reg0/reg2;
+        reg8=reg8/reg2; res[4]=-reg8; reg0=data[3]*reg6; reg3=data[0]*reg3; reg4=reg9*data[2];
+        reg4=reg3-reg4; reg4=reg0+reg4; res[5]=reg4/reg2; reg0=data[14]*data[4]; reg3=data[12]*data[6];
+        reg3=reg0-reg3; reg0=data[3]*reg3; reg13=data[0]*reg13; reg4=data[4]*data[15]; reg8=data[12]*data[7];
+        reg8=reg4-reg8; reg4=data[2]*reg8; reg4=reg13-reg4; reg4=reg0+reg4; reg4=reg4/reg2;
+        res[6]=-reg4; reg0=data[4]*data[10]; reg4=data[6]*data[8]; reg4=reg0-reg4; reg0=data[3]*reg4;
+        reg16=data[0]*reg16; reg13=data[4]*data[11]; reg14=data[8]*data[7]; reg14=reg13-reg14; reg13=data[2]*reg14;
+        reg13=reg16-reg13; reg13=reg0+reg13; res[7]=reg13/reg2; reg0=reg10*data[3]; reg5=data[0]*reg5;
+        reg9=reg9*data[1]; reg9=reg5-reg9; reg9=reg0+reg9; reg9=reg9/reg2; res[9]=-reg9;
+        reg0=data[4]*data[13]; reg5=data[12]*data[5]; reg5=reg0-reg5; reg0=data[3]*reg5; reg15=data[0]*reg15;
+        reg8=data[1]*reg8; reg8=reg15-reg8; reg8=reg0+reg8; res[10]=reg8/reg2; reg0=data[4]*data[9];
+        reg8=data[5]*data[8]; reg8=reg0-reg8; reg0=data[3]*reg8; reg18=data[0]*reg18; reg14=data[1]*reg14;
+        reg14=reg18-reg14; reg14=reg0+reg14; reg14=reg14/reg2; res[11]=-reg14; reg12=reg12/reg2;
+        res[12]=-reg12; reg10=reg10*data[2]; reg1=data[0]*reg1; reg6=reg6*data[1]; reg6=reg1-reg6;
+        reg6=reg10+reg6; res[13]=reg6/reg2; reg5=data[2]*reg5; reg7=data[0]*reg7; reg3=data[1]*reg3;
+        reg3=reg7-reg3; reg3=reg5+reg3; reg3=reg3/reg2; res[14]=-reg3; reg8=data[2]*reg8;
+        reg11=data[0]*reg11; reg4=data[1]*reg4; reg4=reg11-reg4; reg4=reg8+reg4; res[15]=reg4/reg2;
+        return res
+    
+    
+    def mul( trans ) when trans.type == GlTransformation[ T ]
+        res := GlTransformation[ T ]()
+        res.data = data * trans.data
+        return res
+        
+    def mul( v ) when v.tensor_order == 1
+        res := Vec[ T, 3 ]() # hum
+        for i in 0 .. 3
+            res[ i ] = data[ i, 0 ] * v[ 0 ] + data[ i, 1 ] * v[ 1 ] + data[ i, 2 ] * v[ 2 ] + data[ i, 3 ]
+        res /= data[ 3, 0 ] * v[ 0 ] + data[ 3, 1 ] * v[ 1 ] + data[ 3, 2 ] * v[ 2 ] + data[ 3, 3 ]
+        return res
+        

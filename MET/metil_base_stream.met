@@ -1,0 +1,455 @@
+##
+  operator print 'something' -> print representation of 'something' and a carriage return.
+  if you don't wan't the carriage return, use 'stdout << something'.
+##
+def __print__(var)
+    stdout << var << "\n" << fflush
+
+##
+    Example: 'info 10+20'
+        gives (in stdout) '10+20 -> 30'
+##
+def __info__(var,txt)
+    #a := auto_restore(stdout.options)
+    #   stdout.options.basic_type_info = true
+    #   stdout.options.separator = ","
+    stdout << txt << " -> " << var << "\n"
+
+def __infon__(var,txt)
+    #a := auto_restore(stdout.options)
+    #   stdout.options.basic_type_info = true
+    #   stdout.options.separator = ","
+    stdout << txt << " ->\n" << var << "\n"
+
+#~ ord("i") -> 105 (num of ascii char) ~#
+def ord( str )
+    return Int32(@str.ptr)
+
+##
+##
+class Char
+    static const is_a_Property := false
+    static const is_a_vector := false
+    static const is_an_array := false
+    static const is_a_matrix := false
+    static const is_a_number := false
+    property is_a_Char
+    
+    val ~= Int32
+    encoding ~= Int32
+    def init( v )
+        val.init( v )
+        encoding.init( 0 )
+    def write_to_stream( stream )
+        v := Unsigned8( val )
+        stream.write( untyped_ptr_on( v ), 1 )
+    def equal( b ) when b.is_a_Char
+        return val == b.val
+    def get_represents_a_letter
+        return ( val >= 64 and val <= 90 ) or ( val >= 97 and val <= 122 )
+    def get_represents_a_number
+        return val >= 48 and val <= 57
+    def get_represents_an_underscore
+        return val == 95
+    def conversion_to( i ) when i.type == Int32
+        i.init( val )
+    def conversion_to( i ) when i.type == Unsigned8
+        i.init( val )
+    def conversion_to( i ) when i.type == Int8
+        i.init( val )
+    def get_ord
+        return val
+# ------------------------------------------------------------------------------------------------
+#  Basic configuration classes
+# ------------------------------------------------------------------------------------------------
+
+##
+    Generic class to specify stream behavior
+##
+class StreamOptions
+    display_size := 0 # true if you wan't to display size of vectors. Ex : 'stdout << [7,6,4]' will give '3 7 6 4'
+    separators := (" ","\n","\n\n","\n\n\n") #
+    basic_type_info := 0 #false
+    binary := 0 #
+    base := 10
+    precision := 4 # nb representative values in case of floating point numbers (0 means use type precision)
+    scientific := false # systematic use of 'e' (ex: 1.0e5) in case of floating point numbers
+    fancy := true
+       
+# ------------------------------------------------------------------------------------------------
+#  StringStream
+# ------------------------------------------------------------------------------------------------
+
+##
+    s := StringStream()
+    s << "poeut " << 10
+    s.str will give "pouet 10"
+##
+class StringStream
+    property is_stream
+    str := String()
+    cur := 0
+    options := StreamOptions()
+    
+    def init( s ) when s.type == String
+        str.init( s )
+        cur.init( 0 )
+        options.init()
+    def write_to_stream( stream )               stream << str
+    def get_eof                                 return cur >= str.size
+    def get_tell                                return cur
+    def write( p, bytes )                       str.append( p, bytes )
+    def read                                    return str
+    def conversion_to( b ) when b.type == Bool  b.init( cur < str.size )
+    def flush                                   pass
+    def for_lines( block )
+        while true
+            old_cur := cur
+            while cur < str.size and str[cur] != "\n"
+                cur++
+            block( String( data = str.ptr + old_cur, size = cur - old_cur ) )
+            if cur == str.size
+                break
+            cur++
+
+def join( list, separator=" " )
+    res := StringStream()
+    for i, flag in ListWithFlagTrueOnLastItem( list )
+        res << i
+        if not flag  
+            res << separator
+    return res.str
+    
+# ------------------------------------------------------------------------------------------------
+#  Split
+# ------------------------------------------------------------------------------------------------
+def nb_char_in_common( string_1, string_2 )
+    s := min( string_1.size, string_2.size ); cpt := 0
+    for cpt in 0 .. s
+        if string_1[cpt] != string_2[cpt]
+            return cpt
+    return s
+
+class Split
+    static const tensor_order := 1
+    static const size_evaluation_costs_a_lot := true
+    str := InternalVariable()
+    separators := InternalVariable()
+    def init( s, sep )  str.init_using_var( s ); separators.init_using_var( sep )
+    def __for__( block )
+        cpt := 0; while cpt < str->size and ( str->select(cpt) in @separators )  cpt++
+        old_cpt := cpt
+        while cpt <= str->size
+            if cpt == str->size or ( str->select(cpt) in @separators )
+                if cpt > old_cpt 
+                    block( String( size = cpt - old_cpt, data = str->data_ + old_cpt ) )
+                while cpt < str->size and ( str->select(cpt) in @separators )  cpt++
+                old_cpt = cpt
+            cpt ++
+    def select( i )
+        cpt := 0
+        for j in self
+            if cpt++ == i
+                return j
+        return None
+
+def split( str, separators = [" ","\n","\t","\r"] )  return Split( str, separators )
+
+# ------------------------------------------------------------------------------------------------
+#  assert
+# ------------------------------------------------------------------------------------------------
+## ##
+class AssertionError
+    msg := StringStream()
+    def init( str )
+        msg.init( str )
+    def write_to_stream( stream )
+        stream << msg.str
+
+##
+##
+def throw_failed_assertion( txt, from_stack_level = 0 )
+    stderr <<< txt
+    # stack_info()
+
+    res := AssertionError()
+    cpt := from_stack_level + 1
+    
+    res.msg << txt << "\n"
+
+    while cpt < __nb_stack_level__()
+        fn := __file_at_stack_level__( cpt )
+        if true #not ( "metil_base" in fn )
+            res.msg << fn << ":" << __line_at_stack_level__( cpt ) << ":" << __col_at_stack_level__( cpt )
+            # if cpt == from_stack_level + 1
+            # else
+            res.msg << ":instantiated_from:"
+            res.msg << __line_str_at_stack_level__( cpt, 80 ) << "\n"
+        cpt++
+    throw res
+
+# ------------------------------------------------------------------------------------------------
+#  Stream classes (File...), specific instantiations (stdout...)
+# ------------------------------------------------------------------------------------------------
+
+##
+    Basic class for files.
+##
+class File( write_allowed=false, read_allowed=false )
+    property is_stream, is_a_File
+    f ~= CFile
+    options ~= StreamOptions
+    # name := ""
+    # assert( write_allowed or read_allowed, "must have at least write_allowed==true or read_allowed==true" )
+    def init( file ) when have_same_name( type_of(file), type_of(self) ) pertinence 3
+        f.init( file.f )
+        options.init( file.options )
+    def init( filename, mode = ("r","w")[write_allowed] ) pertinence 2
+        options.init()
+        assert( write_allowed==false or mode=="w" or mode=="w+", "writing is not allowed" )
+        assert( read_allowed ==false or mode=="r" or mode=="r+", "reading is not allowed" )
+        if f.open( filename, mode ) throw "Error while opening " + filename
+    def init( executable, mode = ("r","w")[write_allowed] ) pertinence 1
+        options.init()
+        assert( write_allowed==false or mode=="w" or mode=="w+", "writing is not allowed" )
+        assert( read_allowed ==false or mode=="r" or mode=="r+", "reading is not allowed" )
+        if f.popen( executable, mode ) throw "Error while opening " + executable
+    def destroy                                 f.destroy(); options.destroy()
+    def close                                   f.close()
+    def flush                                   f.flush()
+    def open( filename ,mode )                  f.close(); return f.open( filename, mode )
+    def write_to_stream( stream )               stream << name
+    def get_eof                                 return f.eof()
+    def get_tell                                return f.tell()
+    def get_size                                return f.get_size()
+    def seek( v )                               f.seek( Int64( v ) )
+    def get_next_line( max_nb_char = -1 )       return get_next_line_( f, Int32( max_nb_char ) )
+    def for_lines( block )
+        while f
+            l := get_next_line()
+            block( l )
+
+    def get_lines                               return LinesOfStream( self )
+    def conversion_to(b) when b.type==Bool      b.init( not f.eof() )
+    
+    def write( p, nb_bytes )                    f.write( UntypedPtr( p ), Int32(nb_bytes) )
+    def read ( p, nb_bytes )                    f.read ( UntypedPtr( p ), Int32(nb_bytes) )
+    def write( p )                              f.write( UntypedPtr( &p ), ( size_of( p ) + 7 ) // 8 )
+    def read ( p )                              f.read ( UntypedPtr( &p ), ( size_of( p ) + 7 ) // 8 )
+    def read ( p ) when is_of_type_Def(p)
+        r := p()
+        f.read ( UntypedPtr( &r ), ( size_of( r ) + 7 ) // 8 )
+        return r
+    def read ( p, n ) when is_of_type_Def(p) and n.is_a_number
+        r := allocate( p, n )
+        f.read ( UntypedPtr( r ), p.byte_size_if_in_vec * n )
+        return r    
+    def read                                    return f.read()
+    def read_Untyped
+        r := f.read()
+        r.reserved_ = 0
+        return r.data_
+
+def shift_left(stream,a) when stream.is_stream
+    a.write_to_stream(stream)
+    return stream
+    
+def shift_left_then_endl(stream,a) # when stream.is_stream
+    stream << a << "\n"
+    return stream
+
+def shift_left_long_str( stream, txt ) # when stream.is_stream
+    stream <<< txt
+    return stream
+    
+def shift_right(stream,a) when stream.is_stream
+    a.read_from_stream(stream)
+    return stream
+
+def read_from_stream( self, stream ) when is_of_type_Int32( self ) and stream.is_a_File
+    self.__read_from_stream__( stream.f )
+
+def read_from_stream( self, stream ) when is_of_type_Float32( self ) and stream.is_a_File
+    self.__read_from_stream__( stream.f )
+
+def read_from_stream( self, stream ) when is_of_type_Float64( self ) and stream.is_a_File
+    self.__read_from_stream__( stream.f )
+
+stdout ~= File[true ,false]; stdout.f.init( 0 ); stdout.options.init() # standard output stream
+stderr ~= File[true ,false]; stderr.f.init( 1 ); stderr.options.init() # standard output error stream
+stdin  ~= File[false,true ]; stdin .f.init( 2 ); stdin .options.init() # standard input stream
+
+
+## each "self <<< data" and "self <<<< data" give -> #line $line "file" followed by $data ##
+class StreamWithLinePreProcDirective
+    property is_a_StreamWithLinePreProcDirective
+    f := InternalVariable()
+    def init( stream ) f.init_using_var( stream )
+def shift_left( stream, a ) when stream.is_a_StreamWithLinePreProcDirective pertinence 2
+    @stream.f << a
+    return stream
+def shift_left_then_endl( stream, txt ) when stream.is_a_StreamWithLinePreProcDirective pertinence 2
+    @stream.f << "#line $(__line_at_stack_level__(1)) \"$(__file_at_stack_level__(1))\"\n" <<< txt
+    return stream
+def shift_left_long_str( stream, txt ) when stream.is_a_StreamWithLinePreProcDirective pertinence 2
+    @stream.f << "#line $(__line_at_stack_level__(1)+1) \"$(__file_at_stack_level__(1))\"\n" <<< txt
+    return stream
+    
+    
+## ##
+class LinesOfStream
+    f := InternalVariable()
+    def init( fi )
+        f.init_using_var( fi )
+    def __for__( block )
+        f->for_lines( block )
+
+#
+def popen( executable, mode )
+    return File( executable = executable, mode = mode )
+
+class Fflush
+    def write_to_stream( stream ) stream.flush()
+#
+static const fflush := Fflush()
+
+# things like stream << [0 1 2]
+def write_to_stream( self, stream ) when has___for___method( self ) pertinence -1
+    for i in self stream << i << stream.options.separators[0]
+
+# things like stream >> vec
+def read_from_stream( self, stream ) when has___for___method( self ) pertinence -1
+    for i in self
+        stream >> i
+
+# stream << VarArgs
+def write_to_stream( self, stream ) when is_of_type_VarArgs(self) pertinence -0.5
+   for i in 0 .. self.nb_unnamed_arguments()
+       stream << self.get_unnamed_argument_nb( i ) << " "
+   for i in 0 .. self.nb_named_arguments()
+       stream << self.get_name_of_named_argument_nb( i ) << "=" << self.get_named_argument_nb( i ) << " "
+
+# things like stream << 10
+def write_to_stream( self, stream ) when is_of_type_Bool(self) pertinence 0.5
+    if self  stream << "true"
+    else     stream << "false"
+
+# things like stream << 10
+def write_to_stream( self, stream ) when self.is_a_number pertinence 0
+    if is_of_type_Op( self )
+        stream << self.cpp_string()
+    else if self.is_a_rationnal_number
+        stream << self.to_string()
+    else
+        if self.is_a_float_number
+            if self < 0
+                stream << "-"
+                ( - self ).write_to_stream( stream )
+            else
+                stream << self.to_string( stream.options.precision )
+                # TODO -> nan or inf
+#                 precision := stream.options.precision
+#                 if precision == 0
+#                     precision = self.nb_bits_in_mantissa * log(Float32(2)) / log(Float32(stream.options.base))
+#                 #
+#                 if stream.options.scientific or true
+#                     # find base exponent
+#                     nb := self
+#                     e := 0
+#                     if nb
+#                         if nb < 1
+#                             while nb < 1
+#                                 nb *= stream.options.base
+#                                 e -= 1
+#                         else
+#                             while nb >= stream.options.base
+#                                 nb /= stream.options.base
+#                                 e += 1
+#                         # round value
+#                         nb += nb.type(stream.options.base) ** (-1-precision)
+#                     
+#                     # display
+#                     inb := Int8(nb)
+#                     stream << Char( inb + 48 ) << "."
+#                     nb -= inb;
+#                     nb *= stream.options.base
+#                     while precision
+#                         inb = Int8(nb)
+#                         nb -= inb;
+#                         stream << Char( inb + 48 )
+#                         nb *= stream.options.base
+#                         precision--
+#                     stream << "e" << e
+        else # we represent number without e... notations
+            stream << self.to_string()
+            # if self < 0
+                # stream << "-"
+                # T := type_of(self)
+                # tmp := T( -1 )
+                # while tmp >= self // T(stream.options.base)
+                    # tmp *= T(stream.options.base)
+                # while tmp <= -1
+                    # stream << Char( (self // tmp) % T(stream.options.base) + 48 )
+                    # tmp //= T(stream.options.base)
+            # else
+                # T := type_of(self)
+                # tmp := T( 1 )
+                # while tmp <= self // T(stream.options.base)
+                    # tmp *= T(stream.options.base)
+                # while tmp >= 1
+                    # stream << Char( (self // tmp) % T(stream.options.base) + 48 )
+                    # tmp //= T(stream.options.base)
+
+# things like stream << 10
+def write_to_stream( self, stream ) when is_of_type_Def( self ) pertinence -1
+    stream << self.to_string()
+
+# things like stream << 10
+def write_to_stream( self, stream ) when is_of_type_InternalVariable( self ) pertinence -1
+    if self
+        stream << @self
+    else
+        stream << "NullRef"
+
+# stream << UntypedPtr
+def write_to_stream( self, stream ) when is_of_type_UntypedPtr( self ) pertinence -1
+    stream << self.to_string()
+
+
+# stream << generic pbject -> display attributes
+def write_to_stream( self, stream ) pertinence -2
+    for name, val in AttributeExplorer( self )
+        stream << name << "=" << val << ", "
+
+
+def scientific_repr( v )
+    if not v
+        return "$v"
+    e := Int32( log( Float64(v) ) / log( Float64(10) ) )
+    v2 := Float64(v) / 10 ^ e
+    return "$(v2)e$e"
+
+# ------------------------------------------------------------------------------------------------------------------------
+# class StreamFancy
+    
+# return a String representing o
+# def fancy_table( o )
+
+# ------------------------------------------------------------------------------------------------------------------------
+def atoi( str )
+    res := 0
+    for i in str
+        res = res * 10 + Int32( i.val - 48 )
+    return res
+
+# ------------------------------------------------------------------------------------------------------------------------
+class StreamFunction
+    var := InternalVariable()
+    function := InternalVariable()
+    def write_to_stream( stream )
+        call( @function, ( @var, stream ) )
+
+# ------------------------------------------------------------------------------------------------------------------------
+global_time_elapsed ~= Float64
+def tic  global_time_elapsed = time_of_day_in_sec()
+def toc  print time_of_day_in_sec() - global_time_elapsed

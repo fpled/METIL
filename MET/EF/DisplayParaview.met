@@ -1,0 +1,160 @@
+import "lazy/LazyObjectStream.met"
+
+#~
+~#
+class DisplayParaview
+    lazy_objects := SplittedVec[ PtrWithCptUse[ LazyObjectAncestor ], 8 ]()
+    filenames    := Vec[ String ]()
+    
+    def write( data, directory )
+        # get mesh pointers
+        field_supports := Set[ Ptr[ FieldSupport ] ]()
+        for d in data
+            if d.is_a_VariableInFormulation
+                field_supports.insert( d.support )
+            else if d.is_a_FieldSupport
+                field_supports.insert( &d )
+                
+        #
+        for fs in field_supports
+            append_to_DisplayParaview( self, fs, data, directory )
+        
+    def apply_lazy_objects( op )
+        for s in lazy_objects
+            op( s )
+        
+    def exec_( pvd_filename = "tmp/collection.pvd" )
+        ls := LazySimpleScheduler( [ self ] ); ls.execute()
+
+        #
+        f := File( pvd_filename, "w" )
+        f <<< "<?xml version='1.0'?>"
+        f <<< "<VTKFile type='Collection' version='0.1'>"
+        f <<< "    <Collection>"
+        for fn, cpt in filenames, 0...
+            f_ := getcwd() + "/" + fn
+            f <<< "        <DataSet part='$cpt' file='$f_'/>"
+        f <<< "    </Collection>"
+        f <<< "</VTKFile>"
+        f.close()
+        #
+        system( "paraview --data=$pvd_filename" )
+
+
+#~
+~#
+def append_to_DisplayParaview( dp, field_support, data, directory ) when field_support->is_a_Mesh
+    def append_to_lo_( lo, nl )
+        if lo nl->add_child( lo )
+        lo = nl
+    #
+    check_or_create_directory( directory )
+    filename := "$directory/mesh_$( dp.filenames.size ).vtu"
+    dp.filenames.push_back( filename )
+    offset := 0
+
+    m := child_cast( field_support )
+
+    #
+    header_str := StringStream()
+    header_str <<< "<VTKFile type='UnstructuredGrid' byte_order='LittleEndian'>"
+    header_str <<< "    <UnstructuredGrid>"
+    header_str <<< "        <Piece NumberOfPoints='$( m->node_list.size )' NumberOfCells='$( m->elem_list.size )'>"
+    header_str <<< "            <PointData>"
+    for d in data
+        if d.nb_nodal_values
+            header_str <<< "                <DataArray Name='$( d.met_name )' NumberOfComponents='$( d.nb_nodal_values )' type='$( d.ScalarType )' format='appended' offset='$offset'></DataArray>"
+            offset += Int32.byte_size + d.val.size_in_memory
+    header_str <<< "            </PointData>"
+    header_str <<< "            <CellData>"
+    header_str <<< "            </CellData>"
+    header_str <<< "            <Points>"
+    header_str <<< "                <DataArray NumberOfComponents='3' type='Float64' format='appended' offset='$offset'/>"
+    offset += Int32.byte_size + m->node_list.size * 3 * Float64.byte_size
+    header_str <<< "            </Points>"
+    header_str <<< "            <Cells>"
+    header_str <<< "                <DataArray Name='connectivity' type='Int32' format='appended' offset='$offset'/>"
+    offset += Int32.byte_size + m->elem_list.size_in_memory // 2 # ( num_lst + index ) -> 2 * Int32
+    header_str <<< "                <DataArray Name='offsets' type='Int32' format='appended' offset='$offset'/>"
+    offset += Int32.byte_size + m->elem_list.size * Int32.byte_size
+    header_str <<< "                <DataArray Name='types' type='Int32' format='appended' offset='$offset'/>"
+    offset += Int32.byte_size + m->elem_list.size * Int32.byte_size
+    header_str <<< "            </Cells>"
+    header_str <<< "        </Piece>"
+    header_str <<< "    </UnstructuredGrid>"
+    header_str <<< "    <AppendedData encoding='raw'>"
+    header_str << "_"
+    #
+    footer_str := StringStream()
+    footer_str <<< ""
+    footer_str <<< "    </AppendedData>"
+    footer_str <<< "</VTKFile>"
+    
+    #
+    lo := PtrWithCptUse[ LazyObjectAncestor ]( NULL )
+    
+    append_to_lo_( lo, new LazyObjectStreamWriter[String]( filename, "w", header_str.str ) )
+    
+    for d in data
+        if d.nb_nodal_values
+            append_to_lo_( lo, new LazyObjectStreamWriter[Int32,true]( filename, "a", d.val.size_in_memory ) )
+            for s in d.val.sub_vecs
+                append_to_lo_( lo, new LazyVecPartWriter( filename, "a", s ) )
+    
+    cum_node_size := Vec[Int32](); nb_nodes := 0
+    append_to_lo_( lo, new LazyObjectStreamWriter[Int32,true]( filename, "a", m->node_list.size * 3 * Float64.byte_size ) )
+    for s in m->node_list.sub_vecs
+        append_to_lo_( lo, new LazyVecPartWriter3( filename, "a", s ) )
+        cum_node_size.push_back( nb_nodes )
+        nb_nodes += s->size
+        
+    append_to_lo_( lo, new LazyObjectStreamWriter[Int32,true]( filename, "a", m->elem_list.size_in_memory // 2 ) )
+    for s in m->elem_list.sub_vecs
+        append_to_lo_( lo, new LazyElemListOperatorWriter[ s->get_ScalarType(), s->ST ]( filename, "a", s, cum_node_size ) )
+        
+    append_to_lo_( lo, new LazyObjectStreamWriter[Int32,true]( filename, "a", m->elem_list.size * Int32.byte_size ) )
+    cum_off := 0
+    for s in m->elem_list.sub_vecs
+        append_to_lo_( lo, new LazyElemListOffsetElemWriter[ s->get_ScalarType(), s->ST ]( filename, "a", s, cum_off ) )
+        cum_off += s->get_ScalarType()::nb_nodes * s->size
+        
+    append_to_lo_( lo, new LazyObjectStreamWriter[Int32,true]( filename, "a", m->elem_list.size * Int32.byte_size ) )
+    for s in m->elem_list.sub_vecs
+        append_to_lo_( lo, new LazyElemListTypeElemWriter[ s->get_ScalarType(), s->ST ]( filename, "a", s ) )
+        
+    append_to_lo_( lo, new LazyObjectStreamWriter[String]( filename, "a", footer_str.str ) )
+    
+    dp.lazy_objects.push_back( lo )
+
+
+#~
+~#
+class LazyVecPartWriter3 inherits LazyObjectAncestor
+    filename := ""
+    mode     := "" # w, a, ...
+    done_    := false
+    
+    def init( f, m, s )
+        init_lazy_obj()
+        filename = f
+        mode     = m
+        add_child( s )
+        
+    
+    virtual def get_done
+        return done_
+        
+    virtual def evaluate
+        f := File( filename, mode )
+        ch := child_cast( children[0] )
+        for i in 0 .. ch->size
+            for j in 0 .. ch->data[i].size
+                v := Float64( ch->data[i][j] )
+                f.write( v )
+            for j in ch->data[i].size .. 3
+                v := Float64( 0 )
+                f.write( v )
+        done_ = true
+    
+    virtual def write_to_stream( s )
+        s << "StreamWriter($mode)"

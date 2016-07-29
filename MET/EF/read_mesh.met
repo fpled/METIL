@@ -1,0 +1,78 @@
+import "Mesh.met"
+import "std_elements.met"
+
+#~
+    magic_nb_0
+    magic_nb_1
+    nb_nodes
+    nb_typ_elems
+    [ typ_elem, nb_elem_of_typ ] * nb_typ_elems
+    pos_nodes
+    connectivity
+~#
+def read_mesh( m, filename ) when filename.is_a_String
+    f := File( filename, "r" )
+    magic_nb_0   := f.read( Int32 )
+    magic_nb_1   := f.read( Int32 )
+    dim          := f.read( Int32 )
+    nb_nodes     := f.read( Int32 )
+    nb_typ_elems := f.read( Int32 )
+    typ_elems    := Vec[ Int32 ]( size = nb_typ_elems )
+    nb_elem_of_t := Vec[ Int32 ]( size = nb_typ_elems )
+    for t, n in typ_elems, nb_elem_of_t
+        f.read( t )
+        f.read( n )
+        
+    # pos_nodes readers
+    beg  := m.ST( f.tell ) # offset in bytes
+    nps  := m.nb_nodes_per_sub_vec
+    num_node_list_beg := m.node_list.sub_vecs.size
+    m.node_list.sub_vecs.reserve( ( nb_nodes + nps - 1 ) // nps )
+    while nb_nodes
+        size := min( nb_nodes, nps ) # how many ?
+        m.node_list.sub_vecs_push_back( 
+            new_lazy_leave( LazyVecPartOperatorReadFromFile[ m.Pvec, Vec[Float64,dim], m.ST ], beg, size, filename )
+        )
+        beg += size * m.Pvec.byte_size # nb
+        nb_nodes -= size
+        
+    # connectivity readers
+    m.elem_list.sub_vecs.reserve( nb_typ_elems )
+    for t, nb_elems in typ_elems, nb_elem_of_t
+        NE := type_elem_from_gmsh_nb( t )
+        TE := InstanceParametricElement[ NE, m.dim, m.ST ]
+        #
+        eps := m.nb_elems_per_sub_vec
+        m.elem_list.sub_vecs.reserve( m.elem_list.sub_vecs.size + ( nb_elems + eps - 1 ) // eps )
+        while nb_elems
+            size := min( nb_elems, eps ) # how many ?
+            m.elem_list.sub_vecs_push_back(
+                new_lazy_leave( LazyElemListOperatorReadFromFile[ TE, m.ST ], beg, size, filename, num_node_list_beg, nps )
+            )
+            beg += size * Int32.byte_size * TE::nb_nodes # Int32
+            nb_elems -= size
+            
+    
+# gmsh format -> met element type
+def type_elem_from_gmsh_nb( t ) when t <= 19
+    if t == 1  return Bar
+    if t == 2  return Triangle
+    if t == 3  return Quad
+    if t == 4  return Tetra
+    if t == 5  return Hexa
+    if t == 6  return Wedge
+    if t == 7  return Pyramid
+    if t == 8  return "second order line (2 nodes associated with the vertices and 1 with the edge)."
+    if t == 9  return "second order triangle (3 nodes associated with the vertices and 3 with the edges)."
+    if t == 10 return "9-node second order quadrangle (4 nodes associated with the vertices, 4 with the edges and 1 with the face)."
+    if t == 11 return "10-node second order tetrahedron (4 nodes associated with the vertices and 6 with the edges)."
+    if t == 12 return "27-node second order hexahedron (8 nodes associated with the vertices, 12 with the edges, 6 with the faces and 1 with the volume)."
+    if t == 13 return "18-node second order prism (6 nodes associated with the vertices, 9 with the edges and 3 with the quadrangular faces)."
+    if t == 14 return "14-node second order pyramid (5 nodes associated with the vertices, 8 with the edges and 1 with the quadrangular face)." 
+    if t == 15 return NodalElement
+    if t == 16 return "8-node second order quadrangle (4 nodes associated with the vertices and 4 with the edges)."
+    if t == 17 return "20-node second order hexahedron (8 nodes associated with the vertices and 12 with the edges)."
+    if t == 18 return "15-node second order prism (6 nodes associated with the vertices and 9 with the edges)."
+    if t == 19 return "13-node second order pyramid (5 nodes associated with the vertices and 8 with the edges)."
+
+    

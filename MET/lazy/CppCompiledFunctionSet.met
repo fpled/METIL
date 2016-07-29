@@ -1,0 +1,104 @@
+import "generate_cpp_struct.met"
+import "BuildEnv.met"
+
+#~
+~#
+class CppCompiledFunctionSet[ FS ]
+    static data := CppCompiledFunctionSet_( FS() )
+    static def get_func( func_name )
+        return data[ func_name ]
+#~
+    @see CppCompiledFunctionSet
+~#
+class CppCompiledFunctionSet_
+    property is_a_CppCompiledFunctionSet_
+    static env := BuildEnv()
+    
+    dl := DlLoader()
+    name_to_func := Map[ String, UntypedPtr ]()
+    
+    def init( fs ) when not fs.is_a_CppCompiledFunctionSet_
+        name_to_func.init()
+        
+        # base file name
+        met_n := met_name( type_of( fs ) )
+        if met_n.size > 128
+            met_n = md5_str( met_n )
+        
+        base_file_name := env.GEN_DIR + "/" + met_n
+        so_file_name   := base_file_name + ".so"
+        have_to_compile := not last_modification_time_or_zero_of_file_named( so_file_name )
+        # look for a .so file, look for control sum
+        if not have_to_compile
+            dl.init( so_file_name )
+            assert( dl, dl.get_last_error() )
+            control_sum := Ptr[Int64]( dl.find_symbol( "control_sum" ) )
+            have_to_compile = ( control_sum == NULL or @control_sum != fs.get_control_sum() )
+            if have_to_compile
+                dl.destroy()
+                
+        # else, make a .cpp file
+        if have_to_compile
+            cpp_file_name  := base_file_name + ".cpp"
+            make_cpp_code( fs, File( cpp_file_name, "w" ) )
+            # and compile it
+            o_file_name    := base_file_name + ".o"
+            assert( env.make_object_from_cpp ( cpp_file_name, o_file_name , want_so = true )==0, "Compilation pb" )
+            assert( env.make_lib_from_objects( o_file_name  , so_file_name, want_so = true )==0, "Link edition pb" )
+            dl.init( so_file_name )
+            assert( dl, dl.get_last_error() )
+        
+    def make_cpp_code( fs, stream )
+        control_sum := fs.get_control_sum()
+        write_metil_base_object_for_cpp( stream )
+        stream <<< "Int64 control_sum = $control_sum;"
+        
+        # types -> C struct
+        already_generated := Set[String]()
+        for wf in fs.wanted_functions
+            for T in @wf.arg_types
+                generate_cpp_struct( stream, T, already_generated )
+                
+        # src text
+        fs.get_src( stream ) 
+                
+        # wrappers
+        for wf in fs.wanted_functions
+            args := Vec[String]()
+            for n in 0 .. wf.arg_types->size
+                args.push_back( "_Variable_ *var_$n" )
+            stream <<< "extern \"C\" void metil_$(wf.name)( $(join(args,", ")) ) {"
+            for T, n in @wf.arg_types, 0...
+                ns := met_name_in_struct(T,"VT_$n")
+                stream <<< "    typedef $ns;"
+                args[ n ] = "*reinterpret_cast<VT_$n *>( var_$n->data )"
+            # call
+            stream <<< "    $(wf.name)( $(join(args,",\n        "))\n    );"
+            stream <<< "}"
+        
+        
+    def select( func_name )
+        f := dl.find_symbol( "metil_" + func_name )
+        assert( f, "function '$func_name' not found in dylib." )
+        return f
+
+#~
+~#    
+class CppFunctionDescription
+    name      := ""
+    arg_types := InternalVariable()
+    def init( name, arg_types = [] )
+        self.name.init( name )
+        self.arg_types.init_using_var( arg_types )
+        
+#~
+
+~#        
+def check_or_create_directory( d )
+    absolute := d.size and ( d[0]=="/" or d[0]=="\\" )
+    s := Vec[String]( split_dir( d ) )
+    for i in 1 .. s.size + 1
+        nd := "/" * absolute + join( s[0..i], "/" )
+        if last_modification_time_or_zero_of_file_named( nd ) == 0
+            system( "mkdir $nd 2> /dev/null" )
+        

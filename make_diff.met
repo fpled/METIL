@@ -1,0 +1,28 @@
+def w_d( function, fout, nr )
+    n_max := 8
+    a := symbol("a")
+    v := Vec[Op,n_max]( function = x => symbol("r_0[$x]") )
+    p := dot( v, range(v.size).map( a^_0 ) )
+    f := sqrt( p )
+    s := Vec[Op]()
+    fout <<< "                    switch ( nb_elements ) {"
+    for i in 0 .. n_max
+        r := f.subs( a, 0 ) / factorial( i )
+        f = f.diff(a)
+        s.push_back( r )
+        cw := CodeWriter("Ex")
+        cw.add( nr, s, reassign )
+        #
+        fout <<< "                        case $(i + 1): {"
+        fout << cw.to_string(28)
+        fout <<< "                            break;"
+        fout <<< "                        }"
+    fout <<< "                        default:"
+    fout <<< "                            th->add_error( \"TODO : PolynomialExpansion for type \"+std::string(Nstring(a->type))+\" and order > $n_max -> see file 'ex.cpp'.\", tok );"
+    fout <<< "                    }"
+    # s.display_tex()
+    
+w_d( sqrt (_0), File("CPP/symbolic/series_sqrt.h","w"), "r" )
+w_d( rsqrt(_0), File("CPP/symbolic/series_rsqrt.h","w"), "r" )
+
+w_d( inv  (_0), File("CPP/symbolic/series_inv.h","w"), "t_o" )

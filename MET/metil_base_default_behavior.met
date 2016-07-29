@@ -1,0 +1,489 @@
+
+def equal( a, b ) pertinence -2
+    return a.equal( b )
+    
+def equal         ( a, b ) when is_of_type_Op(a) and is_of_type_Op(b) pertinence 100 return eqz( a - b )
+def inferior      ( a, b ) when is_of_type_Op(a) and is_of_type_Op(b) pertinence 100 return 1 - heaviside( a - b )
+def superior      ( a, b ) when is_of_type_Op(a) and is_of_type_Op(b) pertinence 100 return 1 - heaviside( b - a )
+def inferior_equal( a, b ) when is_of_type_Op(a) and is_of_type_Op(b) pertinence 100 return heaviside( b - a )
+def superior_equal( a, b ) when is_of_type_Op(a) and is_of_type_Op(b) pertinence 100 return heaviside( a - b )
+def not_equal     ( a, b ) when is_of_type_Op(a) and is_of_type_Op(b) pertinence 100 return 1 - eqz( a - b )
+
+# def equal( a, b ) when a.is_a_number==false and b.is_a_number==false  pertinence 0.5
+    # if type_of(a) != type_of(b)
+        # return false
+    # for num_attr in 0 .. nb_attributes_of( a )
+        # if attribute_nb_of( a, num_attr ) != attribute_nb_of( b, num_attr )
+            # return false
+    # return true
+
+#~ check @a == @b if a and b are non NULL, else, return false if one is not null only. ~#
+def equal_pointed( a, b )
+    if a
+        if b
+            return @a == @b
+        return false
+    return not b
+
+def not_boolean( a ) if a return false; return true
+def xor_boolean( a, b )
+    if a
+        return not b
+    return b
+    
+def self_add( a, b )      a = a + b
+def self_sub( a, b )      a = a - b
+def self_mul( a, b )      a = a * b
+def self_div( a, b )      a = a / b
+def self_div_int( a, b )  a = a // b
+def self_mod( a, b )      a = a % b
+
+def self_and( a, b )      a = and_bitwise( a, b )
+def self_or( a, b )       a = or_bitwise( a, b )
+
+def self_shift_right( a, b )      a = a >> b
+def self_shift_left ( a, b )      a = a << b
+
+def post_inc( a )         r := a; a += 1; return r
+def post_dec( a )         r := a; a -= 1; return r
+
+def pre_inc( a )          a += 1; return a
+def pre_dec( a )          a -= 1; return a
+
+def max( a, b )
+    if a >= b return a; return b
+def min( a, b )
+    if a <= b return a; return b
+
+def max( a, b ) when is_of_type_Op(a) or is_of_type_Op(b) pertinence 100 
+    return a + pos_part( b - a )
+
+def min( a, b ) when is_of_type_Op(a) or is_of_type_Op(b) pertinence 100 
+    return b - pos_part( b - a )
+
+def clamp( val, mi, ma ) when val.is_an_integer_number
+    if val < mi
+        return mi
+    if val > ma
+        return ma
+    return val
+    
+def not_equal( a, b ) pertinence -1  return not equal( a, b )
+
+def odd ( n ) return Bool( and_bitwise( n, 1 ) )
+def even( n ) return not ( and_bitwise( n, 1 ) )
+
+def swap( a, b )  t := a; a = b; b = t
+
+# reduction with nb args > 2
+def min( a, varargs ) when varargs.nb_unnamed_arguments() > 1 pertinence -1   return min( a, call_with_return( min, varargs ) )
+def max( a, varargs ) when varargs.nb_unnamed_arguments() > 1 pertinence -1   return max( a, call_with_return( max, varargs ) )
+def add( a, varargs ) when varargs.nb_unnamed_arguments() > 1 pertinence -1   return add( a, call_with_return( add, varargs ) )
+def mul( a, varargs ) when varargs.nb_unnamed_arguments() > 1 pertinence -1   return mul( a, call_with_return( mul, varargs ) )
+
+def __pow__( a, b ) return pow( a, b )
+
+# def get_max_representable( self ) when is_of_type_Def( self ) 
+    # return ( partial_instanciation self ).max_representable
+    
+# 
+def div_int( a, b ) pertinence -1   return div( a, b )
+
+#
+def ceil ( a ) when a.is_an_integer_number   return a
+def floor( a ) when a.is_an_integer_number   return a
+
+#
+def ceil( a, n ) when a.is_an_integer_number
+    t := a + n - 1
+    return t - t % n
+
+#
+def ceil( a ) when a.tensor_order == 1
+    return VecOp( ceil, a )
+
+#
+def inv( a )  return a.neutral_element / a
+
+#
+def get_neutral_element( self ) return self.type( 1 )
+
+# pow( something, integer )
+def pow( a, i ) when i.is_an_integer_number and a.tensor_order<=0 and not is_of_type_Op(a) pertinence 11
+    if i == 0
+        return a.type( 1 )
+    if i > 0
+        res := a
+        cpt := 1; while cpt++ < i  res *= a
+        return res
+    # else -> i < 0
+    return pow( inv( a ), -i )
+
+# \sqrt a
+def sqrt( a )
+    return pow( a, 0.5 )
+
+# \rsqrt a
+def rsqrt( a )
+    return pow( a, -0.5 )
+    
+# heaviside( something )
+def heaviside( a )
+    return Int32( a >= 0 )
+
+# abs( something )
+def abs( a )
+    if a >= 0
+        return a
+    return -a
+
+# sgn -> -1 if neg, 0 if null, 1 if pos
+def sgn( a )
+    return heaviside( a ) - heaviside( - a )
+
+def and_boolean(a)
+    pouet += 666
+def or_boolean(a)
+    pouet += 666
+def xor_boolean(a)
+    pouet += 666
+
+# ------------- properties -------------
+def get_type                           ( self ) return type_of( self )
+def get_tensor_order                   ( self ) return -1 # by default -> a scalar
+def get_sizes( self ) when self.tensor_order <= 0
+    return []
+def get_is_a_number                    ( self ) return false
+def get_is_a_float_number              ( self ) return false
+def get_is_an_integer_number           ( self ) return false
+def get_nb_bits_in_mantissa            ( self ) return 0
+def get_nb_bits_in_denominator_mantissa( self ) return 0
+def get_is_a_signed_number             ( self ) return false
+def get_is_a_vector                    ( self ) return false
+def get_is_a_matrix                    ( self ) return false
+def get_max_representable              ( self ) return self.get_max_representable_not_defined()
+def get_min_representable              ( self ) return self.get_min_representable_not_defined()
+def get_size                           ( self ) assert( 0, "neither get_size() or size is defined for variables of type '$(type_of(self))'." )
+def get_is_a_rationnal_number          ( self ) return false
+def get_is_a_Property                  ( self ) return false
+def get_is_a_function                  ( self ) return false
+def get_size_evaluation_costs_a_lot    ( self ) return false
+def get_epsilon                        ( self ) assert(0,"not defined")
+
+def get_first_item                     ( self ) when tensor_order==1 return self[ 0 ]
+def get_last_item                      ( self ) when tensor_order==1 return self[ self.size - 1 ]
+
+def get_additional_cpp_methods         ( self ) return ""
+
+def get_static_size( self ) when self.tensor_order > 0 pertinence 0
+    return -1
+
+def is_of_type_Op(a)      when __is_a_Property__(a)  return is_of_type_Op( get_value_prop a )
+def is_of_type_Lambda(a)  when __is_a_Property__(a)  return is_of_type_Lambda( get_value_prop a )
+
+def md5_str( a )          when __is_a_Property__(a)  return md5_str( get_value_prop a )
+def get_type_md5_sum( a ) when __is_a_Property__(a)  return get_type_md5_sum( get_value_prop a )
+
+#~ ~#
+class SingleIndexAndValueIterator
+    s := InternalVariable()
+    def init( v )
+        s.init_using_var( v )
+    def __for__( block )
+        block( ( [], @s ) )
+        
+#~ ~#
+def indices_and_values_of( s, compressed = false ) when s.tensor_order <= 0
+    return SingleIndexAndValueIterator( s )
+
+#~ ~#
+class VectorIndexAndValueIterator
+    s := InternalVariable()
+    def init( v )
+        s.init_using_var( v )
+    def __for__( block )
+        for i in 0 .. s->size
+            block( ( [i], s->select(i) ) )
+
+#~ ~#
+def indices_and_values_of( s, compressed = false ) when ( not s.has_for_with_index_and_values ) and s.tensor_order >= 0
+    return VectorIndexAndValueIterator( s )
+
+#~ ~#
+def indices_and_values_of( s, compressed = false ) when s.has_for_with_index_and_values and compressed == false pertinence 1000
+    return s
+
+#~ ~#
+class CompressedIndexAndValueIterator
+    s := InternalVariable()
+    def init( v )
+        s.init_using_var( v )
+    def __for__( block )
+        for i, j in s->structure
+            block( ( [i,j], s->select(i,j) ) )
+
+#~ ~#
+def indices_and_values_of( s, compressed ) when s.has_for_with_index_and_values and compressed == true pertinence 1000
+    return CompressedIndexAndValueIterator( s )
+
+
+# --------- primitive / Property ---------
+def __print__( a )                 when __is_a_Property__(a)  print  get_value_prop a
+def untyped_ptr_on( a )            when __is_a_Property__(a)  return untyped_ptr_on( get_value_prop a )
+def is_of_type_UntypedPtr( a )     return false
+
+def are_of_same_type( a, b )       when __is_a_Property__(a) pertinence 2   return are_of_same_type( get_value_prop a, b )
+def are_of_same_type( a, b )       when __is_a_Property__(b) pertinence 1   return are_of_same_type( a, get_value_prop b )
+
+def are_of_different_type( a, b )  when __is_a_Property__(a) pertinence 2   return are_of_different_type( get_value_prop a, b )
+def are_of_different_type( a, b )  when __is_a_Property__(b) pertinence 1   return are_of_different_type( a, get_value_prop b )
+
+def are_of_type_Def( a, b )        when __is_a_Property__(a) pertinence 2   return are_of_type_Def( get_value_prop a, b )
+def are_of_type_Def( a, b )        when __is_a_Property__(b) pertinence 1   return are_of_type_Def( a, get_value_prop b )
+
+def __get_pointed_value__(a, b)    when __is_a_Property__(b)  return __get_pointed_value__(a,get_value_prop b)
+def __get_data_in_dyn_vec__(a,b,c) when __is_a_Property__(b)  return __get_data_in_dyn_vec__(a,get_value_prop b,c)
+
+def __uninitialised_vec_using_partial_instanciation__(a,b) when __is_a_Property__(a)  toto := a; __uninitialised_vec_using_partial_instanciation__(toto,b)
+def __get_data_in_static_vec__(a,b) when __is_a_Property__(a)  toto := a; __uninitialised_vec_using_partial_instanciation__(toto,b)
+
+def contains_only_named_variables_included_in_self_non_static_variables(self,a)  when __is_a_Property__(a)  toto := a; return self.contains_only_named_variables_included_in_self_non_static_variables(toto)
+    
+def init_using_varargs( any, va )  when __is_a_Property__(any)  call_using_varargs( any.init, va )
+    
+def __init_using_default_values__( a ) when __is_a_Property__(a)  toto := a; __init_using_default_values__( toto )
+def init_and_return_false_if_same_types(a,b) when __is_a_Property__(a) pertinence 2 toto := a; return init_and_return_false_if_same_types( toto, b )
+def init_and_return_false_if_same_types(a,b) when __is_a_Property__(b) pertinence 1 toto := b; return init_and_return_false_if_same_types( a, toto )
+def reassign_and_return_false_if_same_types(a,b) when __is_a_Property__(a) pertinence 2 toto := a; return reassign_and_return_false_if_same_types( toto, b )
+def reassign_and_return_false_if_same_types(a,b) when __is_a_Property__(b) pertinence 1 toto := b; return reassign_and_return_false_if_same_types( a, toto )
+
+def has_size_and_select(a) when __is_a_Property__(a)  toto := a; return has_size_and_select( toto )
+def nb_attributes_of(a) when __is_a_Property__(a)  toto := a; return nb_attributes_of( toto )
+def name_attribute_nb_of(a,b) when __is_a_Property__(a)  toto := a; return name_attribute_nb_of( toto, b )
+def attribute_nb_of(a,b) when __is_a_Property__(a)  toto := a; return attribute_nb_of( toto, b )
+
+def has___for___method(a) when __is_a_Property__(a)  toto := a; return has___for___method( toto )
+
+def known_at_compile_time(a) when __is_a_Property__(a)  toto := a; return known_at_compile_time( toto )
+def known_at_compile_time(a) return true # generic case
+
+def contains_data_of_same_type_only( self, up_to )
+    if up_to <= 1
+        return true
+    for i in 1 .. up_to+1
+        if self[i].type != self[0].type
+            return false
+    return true
+
+
+def select( self, b )  when __is_a_Property__(self) pertinence 2
+    toto := self
+    return toto.select( b )
+def select( self, b )  when __is_a_Property__(b) pertinence 1
+    toto := b
+    return self.select( toto )
+def select( obje, b )
+    return obje.select( b )
+
+def size_of( a ) when __is_a_Property__(a)  toto := a; return size_of(toto)
+
+def get_byte_size( self )
+    return ( size_of( partial_instanciation self ) + 7 ) // 8
+    
+def get_byte_size_if_in_vec( self )
+    return ( size_of_if_in_vec( partial_instanciation self ) + 7 ) // 8
+
+def get_needed_alignement_in_bits( self )
+    return __needed_alignement_in_bits__( partial_instanciation self )
+
+def get_needed_alignement_in_bytes( self )
+    return __needed_alignement_in_bytes__( partial_instanciation self )
+
+# ------------- type promote -----------
+# def type_promote( a, b, op ) pertinence -5
+    # return false
+
+# ...
+def type_promote( a, b, op ) when are_of_same_type( a, b ) pertinence 10 return type_of( a )
+
+# ...
+def type_promote( a, op ) return type_of( a )
+
+# ...
+def type_promote( a, b, op ) when a.is_an_integer_number and b.is_an_integer_number and op == div pertinence 11 return Rationnal
+
+# ...
+def type_promote( a, b, op ) when a.tensor_order > 0 and b.tensor_order > 0 and a.tensor_order != b.tensor_order
+    info a.type
+    info b.type
+    assert( 0, "TODO : promote with a.tensor_order != b.tensor_order" )
+    # if a.tensor_order > b.tensor_order
+        # return type_of( a )
+    # return b.equivalent_symbolic_array( a )
+
+# ...
+def type_promote( a, b, op ) when type_of(a)==String or type_of(b)==String pertinence 15
+    return String
+
+def type_promote( a, b, op ) when type_of(a)==Bool and type_of(b)==Bool and not (op in [and_boolean,or_boolean,xor_boolean]) pertinence 15
+    return Int32
+
+
+##
+    Ex : type_promote_list( [Int32 Float64], [Float32 String], add ) -> [ Float32 String Float64 String ]
+##
+def type_promote_list( la, lb, op )
+    r := VarArgs()
+    for i in la
+        for j in lb
+            r.push_unnamed( type_promote( partial_instanciation i, partial_instanciation j, op ) )
+    return r
+
+##
+    Ex : type_promote_list( [Int32 Float64], [Float32 Float64], mul, add ) -> [ Float64 ]
+##
+def type_promote_list( la, lb, op1, op2 )
+    tl := type_promote_list( la, lb, op1 )
+    r := tl[0]
+    for i in 1 .. tl.size
+        r = type_promote( partial_instanciation r, partial_instanciation tl[i], op2 )
+    return r
+        
+## @see type_promote ##
+def type_promote_scalar_type( want_float, want_rat, want_signed, nb_bits_in_mantissa )
+    if want_float
+        if nb_bits_in_mantissa <= 32  return Float32
+        if nb_bits_in_mantissa <= 64  return Float64
+        if nb_bits_in_mantissa <= 96  return Float96
+        assert( 0, "TODO : float with nb_bits_in_mantissa > 96" )
+    if want_rat
+        return Rationnal
+    if want_signed
+        if nb_bits_in_mantissa <=  8  return Int8
+        if nb_bits_in_mantissa <= 16  return Int16
+        if nb_bits_in_mantissa <= 32  return Int32
+        if nb_bits_in_mantissa <= 64  return Int64
+        assert( 0, "TODO : int with nb_bits > 64" )
+    if nb_bits_in_mantissa <=  8  return Unsigned8
+    if nb_bits_in_mantissa <= 16  return Unsigned16
+    if nb_bits_in_mantissa <= 32  return Unsigned32
+    if nb_bits_in_mantissa <= 64  return Unsigned64
+    assert( 0, "TODO : unsigned int with nb_bits > 64" )
+
+# a.tensor_order == b.tensor_order
+def type_promote( a, b, op ) when a.is_a_number and b.is_a_number
+    if is_of_type_Op( a )  return Op
+    if is_of_type_Op( b )  return Op
+    if a.is_a_rationnal_number and b.is_a_float_number  return type_of( b )
+    if b.is_a_rationnal_number and a.is_a_float_number  return type_of( a )
+    
+    a_f := a.is_a_float_number; a_s := a.is_a_signed_number; a_n := a.nb_bits_in_mantissa
+    b_f := b.is_a_float_number; b_s := b.is_a_signed_number; b_n := b.nb_bits_in_mantissa
+    if a_f >= b_f and a_s >= b_s and a_n >= b_n
+        return type_of( a )
+    if a_f <= b_f and a_s <= b_s and a_n <= b_n
+        return type_of( b )
+    return type_promote_scalar_type( a_f or b_f, a.is_a_rationnal_number or b.is_a_rationnal_number, a_s or b_s, max(a_n,b_n) )
+
+## Ex: true + 10 -> 11 ##
+def op_with_ret_using_type_promote( a, b, op )
+    T := type_promote( a, b, op )
+    if T == type_of( a )
+        return op( a, T(b) )
+    if T == type_of( b )
+        return op( T(a), b )
+    return op( T(a), T(b) )
+
+
+##  ##
+def type_promote_little_vec( vec, op, up_to )
+    if vec.contains_data_of_same_type_only(up_to) # also treats the case 'up_to in (0,1)'
+        return type_of( vec[0] )
+    return type_promote( vec.get_unnamed_argument_nb( up_to ), partial_instanciation type_promote_little_vec( vec, op, up_to-1 ), op )
+    
+##  ##
+def get_sub_types( self )
+    return [ self.T ]
+
+##  ##
+def get_sub_types( self ) when is_of_type_VarArgs( self )
+    res := VarArgs()
+    for v in self
+        res.push_unnamed( type_of(v) )
+    return res
+
+##  ##
+def type_promote( vec, op ) when vec.tensor_order > 0 pertinence 30
+    st := vec.sub_types
+    assert( st.size, "no sub_types !!" )
+    r := st[0]
+    for i in st
+        r = type_promote( partial_instanciation r, partial_instanciation i, op )
+    return r
+
+def cpp_correspondance( T )
+    if T == Int8   return "int"
+    if T == Int16  return "short int"
+    if T == Int32  return "int"
+    if T == Int64  return "long long int"
+    if T == Unsigned8   return "unsigned"
+    if T == Unsigned16  return "short unsigned"
+    if T == Unsigned32  return "unsigned"
+    if T == Unsigned64  return "long long unsigned"
+    if T == Float32  return "float"
+    if T == Float64  return "double"
+    if T == Float96  return "long double"
+    assert( 0, "$T has no cpp correspondance" )
+
+## n ! ##
+def factorial( n )
+    res := n.type(1)
+    for i in n.type(1) .. n+1  res *= i
+    return res
+    
+#~
+    Mat[ Int32, ... ]::EqTypeWithScalarType( Float64 ) -> Mat[ Float64, ... ]
+~#
+def EqTypeWithScalarType( self, TO ) when self.tensor_order <= 0
+    return TO
+
+    
+# ------------------------------------------------------------------------------------
+proc_has_SSE := true
+proc_has_SSE2 := true
+
+# nb values in simd vector
+def default_simd_size( T ) return 1
+def default_simd_size( T ) when proc_has_SSE2 and T == Float32 return 4
+def default_simd_size( T ) when proc_has_SSE2 and T == Float64 return 2
+
+# ------------------------------------------------------------------------------------
+#~
+    scalar_conversion( String, 10 ) -> "10"
+    scalar_conversion( String, [10 20] ) -> Vec[String](["10" "20"])
+    ...
+~#
+def scalar_conversion( T, val ) when val.tensor_order <= 0
+    return T(val)
+
+def scalar_conversion( T, val ) when val.tensor_order == 1
+    return Vec[ T, Int32(val.static_size) ]( val )
+
+
+# ------------------------------------------------------------------------------------
+class GetNamedArguments
+    a := InternalVariable()
+    def init( v )
+        a.init_using_var( v )
+    def __for__( block )
+        for i in 0 .. a->nb_named_arguments()
+            block( ( a->get_name_of_named_argument_nb( i ), a->get_named_argument_nb( i ) ) )
+
+#~~#
+def get_named_arguments( self ) when is_of_type_VarArgs( self )
+    return GetNamedArguments( self )
+
+# ------------------------------------------------------------------------------------
+def mkdir( directory )
+    return system( "mkdir $directory 2> /dev/null" )
+    

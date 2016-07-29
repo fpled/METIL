@@ -1,0 +1,89 @@
+def w_d( function, fout )
+    n_max := 9
+    a := symbol("a")
+    v := Vec[Op,n_max]( function = x => symbol("r_0[$x]") )
+    p := dot( v, range(v.size).map( a^_0 ) )
+    f := function( p )
+    s := Vec[Op]()
+    fout <<<<
+        void exp_rec_$function( Op *a ) {
+            Op *ch_0 = a->func_data()->children[0]; exp_rec( ch_0 ); const Ex *r_0 = reinterpret_cast<const Ex *>( ch_0->additional_info );
+            if ( ch_0==NULL ) {
+                a->additional_info = NULL;
+            } else {
+                r_0 = complete_if_necessary( r_0, ch_0 );
+                Ex *r = tmp_vec.get_room_for( nb_elements );
+                a->additional_info = reinterpret_cast<Op *>( r );
+                //
+                switch ( nb_elements ) {
+    for i in 0 .. n_max
+        r := f.subs( a, 0 ) / factorial( i )
+        f = f.diff(a)
+        s.push_back( r )
+        cw := CodeWriter("Ex")
+        cw.add( "r", s, reassign )
+        #
+        fout <<< "            case $(i + 1): {"
+        fout << cw.to_string(16)
+        fout <<< "                break;"
+        fout <<< "            }"
+    fout <<< "            default:"
+    fout <<< "                th->add_error( \"TODO : PolynomialExpansion for type \"+std::string(Nstring(a->type))+\" and order > $n_max -> see file 'ex.cpp'.\", tok );"
+    fout <<< "        }"
+    fout <<< "    }"
+    fout <<< "}"
+    # s.display_tex()
+    
+def w_d2( function, fout )
+    n_max := 9
+    a := symbol("a")
+    b := symbol("b")
+    v := Vec[Op,n_max]( function = x => symbol("r_0[$x]") )
+    w := Vec[Op,n_max]( function = x => symbol("r_1[$x]") )
+    p := dot( v, range(v.size).map( a^_0 ) )
+    q := dot( w, range(w.size).map( a^_0 ) )
+    f := function( p , q )
+    s := Vec[Op]()
+    fout <<<<
+        void exp_rec_$function( Op *a ) {
+            Op *ch_0 = a->func_data()->children[0]; exp_rec( ch_0 ); const Ex *r_0 = reinterpret_cast<const Ex *>( ch_0->additional_info );
+            Op *ch_1 = a->func_data()->children[1]; exp_rec( ch_1 ); const Ex *r_1 = reinterpret_cast<const Ex *>( ch_1->additional_info );
+            if ( ch_0==NULL ) {
+                a->additional_info = NULL; }
+            if ( ch_1==NULL ) {
+                a->additional_info = NULL;    
+            } else {
+                r_0 = complete_if_necessary( r_0, ch_0 );
+                r_1 = complete_if_necessary( r_1, ch_1 );
+                Ex *r  = tmp_vec.get_room_for( nb_elements );
+                a->additional_info = reinterpret_cast<Op *>( r );
+                //
+                switch ( nb_elements ) {
+    for i in 0 .. n_max
+        r := f.subs( a, 0 ) / factorial( i )
+        f = f.diff(a)
+        s.push_back( r )
+        cw := CodeWriter("Ex")
+        cw.add( "r", s, reassign )
+#
+        fout <<< "            case $(i + 1): {"
+        fout << cw.to_string(16)
+        fout <<< "                break;"
+        fout <<< "            }"
+    fout <<< "            default:"
+    fout <<< "                th->add_error( \"TODO : PolynomialExpansion for type \"+std::string(Nstring(a->type))+\" and order > $n_max -> see file 'ex.cpp'.\", tok );"
+    fout <<< "        }"
+    fout <<< "    }"
+    fout <<< "}"
+    
+fout := File("CPP/symbolic/series_func_1.h","w")
+# fout := ref stdout
+for func in [ log exp sin cos tan asin acos atan ]
+    w_d( func, fout )
+    print(func)
+    
+w_d2( atan2, fout )
+fout2 := File("CPP/symbolic/series_pow.h","w")
+w_d2( pow, fout2 )
+
+

@@ -1,0 +1,939 @@
+Pi := 2 * asin( Float64( 1 ) )
+
+##
+    make an unknown variable of type T
+##
+def symbol( cpp_name, tex_name = cpp_name )
+    return symbol( String(cpp_name), String(tex_name) )
+
+#~
+    display symbolic graph of variable v with dependencies written in red
+~#
+def display_graphviz( self, lst )
+    f := File("res.dot","w")
+    f <<< "digraph popoterie {"
+    l := VarArgs()
+    for i in lst
+        l.push_unnamed( i )
+    f << self.graphviz_string( l )
+    f <<< "}"
+    f.close()
+
+    system( "dot -Tpdf res.dot > res.pdf; okular res.pdf" )
+
+#~
+    display symbolic graph of variable v
+~#
+def display_graphviz( self )
+    self.display_graphviz( [] )
+
+#~
+~#
+def graphviz_string( self ) when self.tensor_order == 1
+    res := ""
+    for i in self
+        res <<< i.graphviz_string()
+    return res
+
+##
+    make a .tex file and display corresponding .eps
+##
+def launch_and_display_tex_with_str( str, filename="tmp", blocking = false )
+    f := File("$filename.tex","w")
+    f <<<<
+        \documentclass{article}
+        \usepackage[latin1]{inputenc}
+        %\usepackage{graphicx}
+        \usepackage{amsmath}
+        \begin{document}
+        \pagestyle{empty}
+        $str
+        \end{document}
+    f.close()
+
+    # display_command := join( ( "okular", "evince" ).map( _0 + " $filename.eps" ), " || " )
+    if system( "latex --interaction=nonstopmode $filename.tex > /dev/null 2> /dev/null" )
+        stderr <<< "Pb in latex formula (command was latex --interaction=nonstopmode $filename.tex)."
+    if system( "dvips -O0in,11in -E -o $filename.eps $filename.dvi > /dev/null 2> /dev/null" )
+        stderr <<< "Pb with dvips (command was dvips -O0in,11in -E -o $filename.eps $filename.dvi)."
+    prg_found := false
+
+    #
+    nb := " &" * (not blocking)
+    if system( "okular $filename.eps $nb" ) == 0 #  > /dev/null 2> /dev/null
+        return none
+    #
+    if system( "epstopdf $filename.eps && kpdf $filename.pdf $nb" ) == 0 #  > /dev/null 2> /dev/null
+        return none
+    #
+    if system( "gv $filename.eps $nb" ) == 0 #  > /dev/null 2> /dev/null
+        return none
+    #
+    prg_list := ["okular","gv","evince"]
+    stderr <<< "Pb to display a .eps file (file was $filename.eps and $prg_list have been tested)."
+    # for prg in prg_list
+        # if system( "$prg $filename.eps" + " &" * (not blocking) ) == 0 #  > /dev/null 2> /dev/null
+            # prg_found = true
+            # break
+    # if not prg_found
+        # stderr <<< "Pb to display a .eps file (file was $filename.eps and $prg_list have been tested)."
+
+#~
+~#
+def tex_string( self )
+    return String( self )
+
+##
+    display symbolic formual of variable v
+##
+def display_tex( self, filename="tmp", blocking = true )
+    launch_and_display_tex_with_str( "\$\displaystyle{}" + self.tex_string() + "\$", filename, blocking )
+
+def display_few_eqns(V, filename="tmp") when V.is_a_vector
+    t:=V.size
+    f:= File("$filename.tex","w")
+    f<<"\\documentclass[a3paper,landscape,9pt]{report}\n\\usepackage[latin1]{inputenc}\n\\usepackage{geometry}\n\\geometry{hmargin=2.0cm,vmargin=1.5cm}\n\\usepackage{graphicx}\n\\usepackage{amsmath}\n\\begin{document}\n\\pagestyle{empty}\n"
+    for i in 0..t
+        f << "$\displaystyle" +V[i].tex_string() + " $\\\ "
+    f << "\\end{document}\n"
+    f.close()
+    display_command := join( ( "okular", "kpdf", "xpdf", "gv", "acroread" ).map( _0 + " $filename.pdf" ), " || " )
+    if system( "latex --interaction=nonstopmode $filename.tex > /dev/null 2> /dev/null && dvips -o $filename.eps $filename.dvi > /dev/null 2> /dev/null " +
+            "&& evince $filename.eps 2> /dev/null" ) #  && ( $display_command )
+        stderr << "erroneous symbol in the formula.\n"
+
+def store_tex_file( str, filename="storage")
+    f := File("$filename.tex","w")
+    f << "\\documentclass[a3paper,landscape,9pt]{report}\n\\usepackage[latin1]{inputenc}\n\\usepackage{geometry}\n\\geometry{hmargin=2.0cm,vmargin=1.5cm}\n\\usepackage{graphicx}\n\\usepackage{amsmath}\n\\begin{document}\n\\pagestyle{empty}\n"
+    f << str << "\n"
+    f << "\\end{document}\n"
+    f.close()
+    if system( "latex --interaction=nonstopmode $filename.tex > /dev/null 2> /dev/null && dvips -o $filename.eps $filename.dvi > /dev/null 2> /dev/null " )
+        stderr << "erroneous symbol in the formula.\n"
+
+
+def store_tex( self, filename="storage")
+    store_tex_file( "$\displaystyle" + self.tex_string() + "$", filename )
+
+
+def store_few_eqns(V, filename="res") when V.is_a_vector
+    t:=V.size
+    f:= File("$filename.tex","w")
+    f<<"\\documentclass[landscape,9pt]{report}\n\\usepackage[latin1]{inputenc}\n\\usepackage{geometry}\n\\geometry{hmargin=2.0cm,vmargin=1.5cm}\n\\usepackage{graphicx}\n\\usepackage{amsmath}\n\\begin{document}\n\\pagestyle{empty}\n"
+    for i in 0..t
+        f << "$\displaystyle" +V[i].tex_string() + " $\\\ "
+    f << "\\end{document}\n"
+    f.close()
+    if system( "latex --interaction=nonstopmode $filename.tex > /dev/null 2> /dev/null && dvips -o $filename.eps $filename.dvi > /dev/null 2> /dev/null " )
+        stderr << "erroneous symbol in the formula.\n"
+
+def store_few_eqns(self, filename="res") when self.is_a_vector
+    t:=self.size
+    f:= File("$filename.tex","w")
+    f<<"\\documentclass[landscape,9pt]{report}\n\\usepackage[latin1]{inputenc}\n\\usepackage{geometry}\n\\geometry{hmargin=2.0cm,vmargin=1.5cm}\n\\usepackage{graphicx}\n\\usepackage{amsmath}\n\\begin{document}\n\\pagestyle{empty}\n"
+    for i in 0..t
+        f << "$\displaystyle" +self[i].tex_string() + " $\\\ "
+    f << "\\end{document}\n"
+    f.close()
+    if system( "latex --interaction=nonstopmode $filename.tex > /dev/null 2> /dev/null && dvips -o $filename.eps $filename.dvi > /dev/null 2> /dev/null " )
+        stderr << "erroneous symbol in the formula.\n"
+
+def display_few_eqns(V, RHS, filename="res") when V.is_a_vector and RHS.is_a_vector
+    t:=V.size
+    f := File("$filename.tex","w")
+    f<<"\\documentclass[landscape,9pt]{report}\n\\usepackage[latin1]{inputenc}\n\\usepackage{geometry}\n\\geometry{hmargin=2.0cm,vmargin=1.5cm}\n\\usepackage{graphicx}\n\\usepackage{amsmath}\n\\begin{document}\n\\pagestyle{empty}\n"
+    for i in 0..t
+        f << "$\displaystyle" +V[i].tex_string() +"=" + RHS[i] +" $\\\ "
+    f << "\\end{document}\n"
+    f.close()
+    display_command := join( ( "okular", "kpdf", "xpdf", "gv", "acroread" ).map( _0 + " $filename.pdf" ), " || " )
+    if system( "latex --interaction=nonstopmode $filename.tex > /dev/null 2> /dev/null && dvips -o $filename.eps $filename.dvi > /dev/null 2> /dev/null " +
+            "&& evince $filename.eps 2> /dev/null" ) #  && ( $display_command )
+        stderr << "erroneous symbol in the formula.\n"
+
+
+##
+    display symbolic formual of variable v
+##
+def tex_string( self ) when self.tensor_order == 1
+    str := StringStream()
+    str <<< "\\left[\\begin{array}{c}"
+    for i in self.values
+        str << i.tex_string() <<< "\\\\"
+    str <<< "\\end{array}\\right]"
+    return str
+
+##
+    display symbolic formual of variable v
+##
+def tex_string( self ) when self.tensor_order == 2
+    str := StringStream()
+    str <<< "\\left[\\begin{array}{$("c"*self.nb_cols)}"
+    for r in 0 .. self.nb_rows
+        for c in 0 .. self.nb_cols
+            str << self[r,c].tex_string() <<< "&" * ( c != self.nb_cols-1 )
+        str <<< "\\\\" * ( r != self.nb_rows-1 )
+    str <<< "\\end{array}\\right]"
+    return str
+
+# -----------------------------------------------------------------------------------
+## differenciation ( toto.diff(tata) ) ##
+def diff( self, var ) when __is_a_Property__( self ) or __is_a_Property__( var )
+    _self := self
+    _var  := var
+    return _self.diff( _var )
+
+## differenciation ( [toto pouet].diff(tata) ) ##
+def diff( self, var ) when self.tensor_order == 1
+    res := Vec[Op]( size = self.size )
+    for s, r in self, res
+        r = s.diff( var )
+    return res
+
+## differenciation ( [toto pouet].diff(tata) ) ##
+def diff( self, var ) when self.is_a_matrix
+    res := Mat[Op]( self.nb_rows, self.nb_cols )
+    for r in 0 .. self.nb_rows
+        for c in 0 .. self.nb_cols
+            res[r,c] = self[r,c].diff( var )
+    return res
+
+
+# diff elements of lst using a ( return Vec[Op]( x => lst[x].diff(a) ) )
+def diff( lst, a ) when lst.tensor_order == 1 and a.type == Op
+    res := VarArgs()
+    src := VarArgs()
+    for l in lst
+        src.push_unnamed( l )
+    diff( src, a, res )
+    return Vec[Op]( res )
+
+#~ diff scalar by vector -> returns a vector ~#
+def diff( self, vec ) when self.tensor_order <= 0 and vec.tensor_order == 1
+    res := Vec[Op,vec.size]()
+    for r, v in res, vec
+        r = self.diff( v )
+    return res
+
+#~ diff vector by vector -> returns a matrix ~#
+def diff( self, vec ) when self.tensor_order == 1 and vec.tensor_order == 1
+    res := Mat[Op,Gen[self.size,vec.size]]()
+    for i in 0 .. self.size
+        for j in 0 .. vec.size
+            res[i,j] = self[i].diff( vec[j] )
+    return res
+
+#~
+a := symbol ("a")
+expr := a + 1
+info expr.interval( [a], [0], [1] )
+ -> expr.interval( [a], [0], [1] ) -> 1 2
+
+~#
+def interval( self, variables, begins, ends )
+    variables_ := VarArgs()
+    begins_    := VarArgs()
+    ends_      := VarArgs()
+    for v in variables  variables_.push_unnamed( Op( v ) )
+    for v in begins     begins_   .push_unnamed( Op( v ) )
+    for v in ends       ends_     .push_unnamed( Op( v ) )
+    b := Op()
+    e := Op()
+    self.interval( variables_, begins_, ends_, b, e )
+    return [ b, e ]
+
+
+# -----------------------------------------------------------------------------------
+## substitution ( a + b ).subs( b, toto**2 ) -> a + toto**2. Version with lists which are not VarArgs of Op ##
+def poly_deg( self, expr ) when expr.tensor_order == 1
+    va := VarArgs()
+    for e in expr
+        va.push_unnamed( e )
+    return self.poly_deg( va )
+
+# -----------------------------------------------------------------------------------
+## substitution ( a + b ).subs( b, toto**2 ) -> a + toto**2. Version with lists which are not VarArgs of Op ##
+def subs( self, from, to ) when from.tensor_order == 1 and to.tensor_order == 1 and not ( is_of_type_VarArgs(from) or is_of_type_VarArgs(to) )
+    if __is_a_Property__( self )
+        toto := self
+        return toto.subs( from, to )
+    f := VarArgs(); t := VarArgs()
+    for i_f, i_t in from, to
+        f.push_unnamed( i_f )
+        t.push_unnamed( Op(i_t) )
+    return self.subs( f, t )
+
+## substitution dans une matrice##
+def subs( self, from, to ) when self.is_a_matrix pertinence 20
+    toto:=self
+    for r in 0 .. self.nb_rows
+        for c in 0 .. self.nb_cols
+            toto[r,c]=self[r,c].subs( from, to )
+    return toto
+
+
+## substitution ( a + b ).subs( b, toto**2 ) -> a + toto**2 ##
+def subs( self, from, to ) when is_of_type_Op( from )
+    return self.subs( make_varargs(from), make_varargs(Op(to)) )
+
+def subs( self, from, to ) when self.tensor_order == 1 and self.sub_types==[Op] pertinence 20
+    res := Vec[ Op, self.static_size ]( size = self.size )
+    for r in 0 .. self.size
+        res[r].init( self[r].subs( from, to ) )
+    return res
+
+##
+def subs( self, from, to ) when self.is_a_matrix pertinence 20
+    res := Mat[ Op, self.Structure, self.Storage, self.ST ]( nb_rows = self.nb_rows, nb_rows = self.nb_cols )
+    for r in 0 .. res.nb_rows
+        for c in 0 .. res.nb_cols
+            res[r,c].init( self[r,c].subs( from, to ) )
+    return res
+##
+
+## Développements asymptotiques ##
+def asympt_dvp( self, with_regards_to, small_param, new_var, order) when is_of_type_Op( self ) and is_of_type_Op ( with_regards_to ) and is_of_type_Op ( small_param ) and is_of_type_Int32 ( order ) and is_of_type_Op ( new_var )
+    toto := self.subs(with_regards_to,small_param*new_var)
+    resv := taylor_expansion(toto,small_param,0,order)
+    res := Op()
+    for o in 0 .. order+1
+            res += (small_param^o) * resv[o]
+    return res
+
+def asympt_dvp( self, with_regards_to, small_param, new_var, order) when is_of_type_Op( self ) and is_of_type_Op ( small_param ) and is_of_type_Int32 ( order ) and with_regards_to.is_a_vector and new_var.is_a_vector and with_regards_to.sizes == new_var.sizes pertinence 20
+    toto := self.subs(with_regards_to,small_param*new_var)
+    resv := taylor_expansion(toto,small_param,0,order)
+    res := Op()
+    for o in 0 .. order+1
+            res += (small_param^o) * resv[o]
+    return res
+
+def asympt_dvp( self, with_regards_to, small_param, new_var order) when self.is_a_matrix pertinence 20
+    res:=self
+    for r in 0 .. self.nb_rows
+        for c in 0 .. self.nb_cols
+            res[r,c]=self[r,c].asympt_dvp(with_regards_to, small_param, new_var, order)
+    return res
+
+def asympt_dvp( self, with_regards_to, small_param, new_var order) when self.is_a_vector pertinence 20
+    res:=self
+    for r in 0 .. self.size
+        res[r]=self[r].asympt_dvp(with_regards_to, small_param, new_var, order)
+    return res
+
+# return any( val.map( x => self.depends_on(x) ) )
+def depends_on( self, val ) when is_of_type_Op( self ) and val.tensor_order > 0
+    for v in val
+        if self.depends_on( v )
+            return true
+    return false
+
+# return any( val.map( x => self.depends_on(x) ) )
+def depends_on( self, val ) when self.tensor_order > 0
+    for ind, v in indices_and_values_of( self )
+        if v.depends_on( val )
+            return true
+    return false
+
+def linearize_discontinuity_children( self, vars, mids ) when is_of_type_Op( self )
+    va := VarArgs()
+    for v in vars
+        va.push_unnamed( Op( v ) )
+    mi := VarArgs()
+    for v in mids
+        mi.push_unnamed( Op( v ) )
+    return self.linearize_discontinuity_children( va, mi )
+
+# -----------------------------------------------------------------------------------
+## perform simplification on symbolic expression ##
+# def simplify( self, level = 10 ) when self.is_a_number return symbolic_simplifications( self, level )
+
+## perform simplification on symbolic expression ##
+# def simplify( self, level = 10 ) return self.map( symbolic_simplifications( _0, level ) )
+
+#
+def greek_letter( num )
+    l := ( "\\alpha","\\beta","\\gamma","\\delta","\\epsilon","\\zeta","\\eta","\\theta",
+           "\\vartheta","\\iota","\\kappa","\\lambda","\\mu","\\nu","\\xi","\\pi","\\varpi",
+           "\\rho","\\varrho","\\sigma","\\varsigma","\\tau","\\upsilon","\\phi","\\varphi",
+           "\\chi","\\psi","\\omega" )
+    return l[num]
+
+##
+
+##
+class CodeWriter
+    cw ~= CodeWriter_
+
+    def init( T = "double" ) when T.is_a_String
+        cw.init( T )
+
+    def destroy
+        cw.destroy()
+
+    def add( str, expr, method=init ) pertinence 10
+        cw.add_expr( String(str), Op(expr), method )
+        return self
+
+    def add( str, expr, method=init ) when expr.tensor_order == 1 pertinence 11
+        for cpt, val in 0... , expr
+            self.add( "$str[$cpt]", val, method )
+        return self
+
+    def add( str, expr, method=init ) when expr.tensor_order == 2 pertinence 11
+        for i in 0 .. expr.nb_rows
+            for j in 0 .. expr.nb_cols
+                self.add( "$str($i,$j)", expr[i,j], method )
+        return self
+
+    def to_string( nb_spaces = 4 )
+        return cw.to_string( nb_spaces )
+
+##
+
+##
+class CodeWriterAlt
+    cw ~= CodeWriterAlt_
+
+    def init( T = "double", TI = "int", S = "SimdVec<$T>", SI = "SimdVec<$TI>" ) when T.is_a_String
+        cw.init( T, TI, S, SI )
+
+    def destroy
+        cw.destroy()
+
+    def add( str, expr, method=init ) pertinence 10
+        if assumed( expr == 0 )==false or not ( method in [add,sub] )
+            cw.add_expr( String(str), Op(expr).a_posteriori_simplification(), method )
+        return self
+
+    def add( str, expr, method=init ) when expr.tensor_order == 1 pertinence 11
+        for cpt, val in 0... , expr
+            self.add( "$str[$cpt]", val, method )
+        return self
+
+    def add( str, expr, method=init ) when expr.tensor_order == 2 pertinence 11
+        for i in 0 .. expr.nb_rows
+            for j in 0 .. expr.nb_cols
+                self.add( "$str($i,$j)", expr[i,j], method )
+        return self
+    
+    def make_cw_parallele (a)
+        cw.make_cw_parallele (a)
+    
+    def to_string( nb_spaces = 4 )
+        return cw.to_string( Int32( nb_spaces ) )
+
+    def graphviz_string()
+        return cw.to_graphviz()
+
+    def display_graphviz( f = ".res" )
+        o := File("$f.dot","w")
+        o <<< "digraph toto {"
+        o <<< graphviz_string()
+        o <<< "}"
+        o.close()
+
+        system( "dot -Tps $f.dot > $f.eps; evince $f.eps" )
+
+
+# return true if cond is known_at_compile_time and is true
+def assumed( cond ) when is_of_type_Op( cond )
+    return known_at_compile_time( cond ) and cond.value()
+
+# return true if cond is known_at_compile_time and is true
+def assumed( cond ) when cond.is_a_VecOp and @cond.op == equal
+    if cond.va[0].size != cond.va[1].size
+        return false
+    #
+    for i in cond
+        if not known_at_compile_time( i )
+            return false
+        if not i.value()
+            return false
+    return true
+
+
+# ------------------------------------------------- INTEGRATION -------------------------------------------------
+
+
+
+# f(x) -> [ v_0 V_1 ... ] which represents v_0 + v_1 x + ... + o( x**degree )
+def taylor_expansion( expr, var, center_value, degree )
+    res := Vec[ Op, degree+1 ]()
+    res[ 0 ] = expr
+    for cpt in 1 .. res.size
+        res[ cpt ] = res[ cpt - 1 ].diff( var )
+    acc := Rationnal( 1 )
+    for cpt in 0 .. res.size
+        res[ cpt ] = acc * res[ cpt ].subs( var, center_value )
+        acc /= cpt + 1
+    return res
+
+# return [ [condition_0,positive_in_this_interval_0,beg_0,end_0], [condition_1,positive_in_this_interval_1,beg_1,end_1]... ]
+def intersection_of_beg_end_and_intervals_where_values_of_expr_are_positive_or_zero( expr, var, beg, end )
+    def app_to_inter( res, cond, pos, beg, end )
+        if not assumed( cond == false )
+            res.push_unnamed( [ cond, pos, beg, end ] )
+    #
+    res := VarArgs()
+    a0 := expr; a1 := a0.diff( var ); a2 := a1.diff( var ); a3 := a2.diff( var )
+    assert( assumed( a3 == 0 ), "unable to do intersection_of_beg_end_and_intervals_where_values_of_expr_are_positive_or_zero with polynomials of degree > 2 ($expr)" )
+    #
+    a0 = a0.subs( var, 0 ); a1 = a1.subs( var, 0 ); a2 = a2.subs( var, 0 ) / 2 * 0
+    # cases when a2 and a1 == 0
+    app_to_inter( res, ( a2 == 0 ) * ( a1 == 0 ), ( a0 >= 0 ), beg, end )
+    # a2 == 0
+    int := - a0 / ( a1 + (a1==0) )
+    app_to_inter( res, ( a2 == 0 ) * ( a1 != 0 ) * ( end >= int ), ( a1 >= 0 ), max( beg, int ), end )
+    app_to_inter( res, ( a2 == 0 ) * ( a1 != 0 ) * ( int >= beg ), ( a1 <  0 ), beg, min( int, end ) )
+
+    # a2 != 0
+    delta := a1**2 - 4 * a0 * a2
+    delta_pos := ( delta > 0 )
+    # case delta < 0 -> no zeroes
+    app_to_inter( res, ( delta < 0 ), ( a2 > 0 ), beg, end )
+    # case delta >= 0
+    r1 := - ( a1 + sqrt( abs( delta ) ) ) / ( 2 * a2 + (a2==0) )
+    r2 := - ( a1 - sqrt( abs( delta ) ) ) / ( 2 * a2 + (a2==0) )
+    app_to_inter( res, ( a2 != 0 ) * ( delta >= 0 ) * ( r1 >= beg ), ( a2 >= 0 ), beg, min( r1, end ) )
+    app_to_inter( res, ( a2 != 0 ) * ( delta >= 0 ) * ( r1 <= end ) * ( r2 >= beg ), ( a2 < 0 ), max( beg, r1 ), min( r2, end ) )
+    app_to_inter( res, ( a2 != 0 ) * ( delta >= 0 ) * ( r2 <= end ), ( a2 >= 0 ), max( beg, r2 ), end )
+
+    # info beg, min( r1, end )
+    # info r1, r2
+    # info max( beg, r2 ), end
+    return res
+
+#\int_{beg}^{end} expr d{var} using a polynomial approximation deg_poly_max
+def polynomial_integration( expr, var, beg, end, deg_poly_max = 5 )
+    coeffs := taylor_expansion( expr, var, ( beg + end ) / 2, deg_poly_max )
+    res := expr.type( 0 )
+    d := ( end - beg ) / 2
+    for cpt in 0 .. coeffs.size
+        if not and_bitwise( cpt, 1 )
+            res += 2 * coeffs[ cpt ] / ( cpt + 1 ) * pow( d, cpt + 1 )
+    return res
+
+# version with [ x, a, b ] where expr==a if x >= 0, or b if x < 0. @see integration
+def integration_with_disc_func_rec_( ds, var, beg, end, deg_poly_max, T ) when is_of_type_VarArgs( ds )
+    res := T( 0 )
+    for int in intersection_of_beg_end_and_intervals_where_values_of_expr_are_positive_or_zero( ds[0], var, beg, end )
+        if not assumed( int[0] == false )
+            if not assumed( 1-int[1] == false )
+                res += int[0] * integration_with_disc_func_rec_( ds[1], var, int[2], int[3], deg_poly_max, T ) * (1-int[1])
+            if not assumed( int[1] == false )
+                res += int[0] * integration_with_disc_func_rec_( ds[2], var, int[2], int[3], deg_poly_max, T ) * int[1]
+    # for int in intersection_of_beg_end_and_intervals_where_values_of_expr_are_positive_or_zero( - ds[0], var, beg, end )
+        # res += int[0] * integration_with_disc_func_rec_( ds[2], var, int[1], int[2], deg_poly_max, T )
+    return res
+
+# no discontinuities. @see integration
+def integration_with_disc_func_rec_( ds, var, beg, end, deg_poly_max, T )
+    # function without discontinuities
+    return polynomial_integration( ds, var, beg, end, deg_poly_max )
+
+## integration des expr par rapport a var de beg a end. deg_poly_max pour les approximations de taylor ##
+def integration( expr, var, beg, end, deg_poly_max=5 ) when expr.tensor_order <= 0
+    if var.type != Op
+        return expr * ( end - beg )
+    return __integration__( Op( expr ), var, Op( beg ), Op( end ), Int32( deg_poly_max ) )
+    # dsc := discontinuities_separation( expr, make_varargs( var ) )
+    # return integration_with_disc_func_rec_( dsc, var, beg, end, deg_poly_max, expr.type )
+
+## integration des expr par rapport a var de beg a end. deg_poly_max pour les approximations de taylor ##
+def integration( expr, var, beg, end, deg_poly_max=5 ) when expr.tensor_order > 0
+    assert( expr.sub_types.size == 1, "TODO" )
+    res := Vec[ expr.sub_types[0], SizeType(expr.size) ]()
+    for i in 0 .. expr.size
+        res[i] = integration( expr[i], var, beg, end, deg_poly_max )
+    return res
+
+##
+    f := lagrange( [10,11,12], [1,2,3], symbol("tx") )
+    info f
+    info f(10)
+    info f(11)
+    info f(12)
+gives
+    f -> (1.0/2.0)*(-11+tx)*(-12+tx)-2*(-10+tx)*(-12+tx)+(3.0/2.0)*(-10+tx)*(-11+tx)
+    f(10) -> 1
+    f(11) -> 2
+    f(12) -> 3
+##
+def lagrange( points, values, variable )
+    assert( values.size == points.size, "values and points are not of same size" )
+    T := type_promote( partial_instanciation type_promote( values, add ), variable, mul )
+    res := T( 0 )
+    for i in 0 .. values.size
+        num := T( 1 ); den := T( 1 )
+        for j in 0 .. values.size
+            if i != j
+                num *= variable  - points[j]
+                den *= points[i] - points[j]
+        res += num / den * values[i]
+    return res
+
+##
+    f := lagrange_nd( [[10],[11],[12]], [1,2,3], [symbol("tx")] )
+    info f
+    info f(10)
+    info f(11)
+    info f(12)
+gives
+    f -> (1.0/2.0)*(-11+tx)*(-12+tx)-2*(-10+tx)*(-12+tx)+(3.0/2.0)*(-10+tx)*(-11+tx)
+    f(10) -> 1
+    f(11) -> 2
+    f(12) -> 3
+##
+def lagrange_nd( points, values, variables )
+    assert( values.size == points.size, "values and points are not of same size" )
+    T := type_promote( partial_instanciation type_promote( values, add ), variables[0], mul )
+    res := T( 0 )
+    for pi, val in points, values
+        num := T( 1 ); den := T( 1 )
+        for d in 0 .. variables.size
+            pushed_in_num := Vec[ T ]( [pi[d]] ) # type_promote( pi[d] )
+            for pj in points
+                if not ( pj[d] in pushed_in_num )
+                    num *= variables[d] - pj[d]
+                    den *= pi[d] - pj[d]
+                    pushed_in_num.push_back( pj[d] )
+        res += num / den * val
+    return res
+
+#~
+  R is the resulting delta vec...
+~#
+def code_writer_nl_eqs( eqs, unknowns, output, symbol_base_name,
+        initialisation = VecCst[0]( size = unknowns.values.size ),
+        precision = VecCst[1e-6]( size = unknowns.values.size ),
+        R = Vec[ Op ](),
+        Tout = "double", nb_spaces = 4, declare_out = false )
+    prel := " " * nb_spaces
+    assert( eqs.size == unknowns.size, "$(eqs.size) != $(unknowns.size)" )
+    unk := Vec[Op]( unknowns.values )
+    #
+    res_symbols := Vec[ Op ]( size = unk.size, function = symbol("$(symbol_base_name)[$_0]") )
+    V := Vec[ Op ]( size = unk.size )
+    M := Mat[ Op, Sym ]( eqs.size, unk.size )
+    linear := true
+    for i in 0 .. eqs.size
+        v := eqs[i]
+        V[i].init( - v )
+        for j in 0 .. unk.size
+            M[i,j].init( v.diff( unk[j] ) )
+            if M[i,j].depends_on( unk )
+                linear = false
+    #
+    m_lu := lu( M )
+    #
+    if linear
+        V = V.subs( unk, Vec[ Op ]( size = unk.size, function = ( x => 0 ) ) )
+        R.init( m_lu * V )
+
+        cw := CodeWriter( T = Tout )
+        cw.add( "$symbol_base_name", R, reassign )
+        # cw.add( "M", M, __print__ )
+        # cw.add( "V", V, __print__ )
+        if declare_out
+            output <<< "$prel$Tout $symbol_base_name[$(R.size)]; { // linear system"
+        else
+            output <<< "$prel{"
+        output <<< cw.to_string( nb_spaces = nb_spaces + 4 )
+        output <<< "$prel}"
+    else # non linear case
+        R.init( ( m_lu * V ).subs( unk, res_symbols ) )
+        if declare_out
+            output <<< "$prel$Tout $symbol_base_name[] = { $(join(initialisation,",")) };"
+        output <<< "$(prel)while ( true ) {"
+        cw := CodeWriter( T = Tout )
+        for r, cpt in R, 0...
+            cw.add( "$(symbol_base_name)_delta_$cpt", r, init )
+        output <<< cw.to_string( nb_spaces = nb_spaces + 4 )
+        for i in 0 .. R.size
+            output <<< "$prel    $symbol_base_name[$i] += $(symbol_base_name)_delta_$i;"
+        cond := ( 0 .. R.size ).map( "fabs( $(symbol_base_name)_delta_$_0 ) <= $(Float64( precision[_0] ))" )
+        output <<< "$prel    if ( $(join( cond," and " )) ) break;"
+        output <<< "$prel}"
+
+    return res_symbols
+
+## ##
+def code_writer_nl_min( value_to_minimize, unknowns, output, symbol_base_name,
+        initialisation = VecCst[0]( size = unknowns.values.size ),
+        precision = VecCst[1e-6]( size = unknowns.values.size ),
+        R = Vec[ Op ](),
+        Tout = "double", nb_spaces = 4, declare_out = false )
+    assert( value_to_minimize.tensor_order <= 0, "Pourte -> TODO" )
+    unk := Vec[Op]( unknowns.values )
+    eqs := Vec[Op]( size = unk.size )
+    for c in 0 .. unk.size
+        eqs[c].init( value_to_minimize.diff( unk[c] ) )
+    return code_writer_nl_eqs( eqs, unknowns, output, symbol_base_name,
+        initialisation, precision, R, Tout, nb_spaces, declare_out )
+
+## ##
+def code_writer_nl_eqs_or_min( val, unknowns, output, symbol_base_name,
+        initialisation = VecCst[0]( size = unknowns.values.size ),
+        precision = VecCst[1e-6]( size = unknowns.values.size ),
+        R = Vec[ Op ](),
+        Tout = "double", nb_spaces = 4, declare_out = false )
+    if val.tensor_order <= 0
+        return code_writer_nl_min( val, unknowns, output, symbol_base_name,
+                initialisation, precision, R, Tout )
+    return code_writer_nl_eqs( val, unknowns, output, symbol_base_name,
+            initialisation, precision, R, Tout, nb_spaces, declare_out )
+
+
+# -----------------------------------------------------------------------------------------------------------------------------------------------
+
+#~
+    Cette fonction retourne l'expression d'une itération de l'algorithme de Newton pour la recherche d'une minimum d'une fonctionelle.
+    entrées :
+        * exp est une expression "scalaire" en ue ou plusieurs inconnues X, Y, Z, W , A , X[0], X[1], etc...
+        * unknows est une variable ou la liste des variables
+        * old_values est une valeur initiale ou une liste de valeurs initiales
+
+    newton_raphson_minimize_iteration( (a-1)^4, [a] )
+        -> [ (1.0/12.0) * (12*pow(-1+a,2)*a-4*pow(-1+a,3)) / pow(-1+a,2) ]
+    newton_raphson_minimize_iteration( (a-3)^2, [a] )
+        -> [ 3 ] (linear system)
+~#
+def newton_raphson_minimize_iteration( expr, unknowns, old_values = Vec[Op,unknowns.size]( default_value = 0 ), assume_matrix_is_factorizable = true )
+    if unknowns.tensor_order <= 0
+        return newton_raphson_minimize_iteration( expr, [unknowns], old_values )
+    if expr.type != Op
+        assert( expr.tensor_order <= 0, "first argument of newton_raphson_minimize_iteration must be a scalar" )
+        return newton_raphson_minimize_iteration( Op(expr), unknowns, old_values )
+    #
+    # nb_unknowns := unknowns.size
+    # qe := quadratic_expansion( p, [ a b ] )
+    # M := Mat[ Op, Sym[nb_unknowns] ]()
+    # V := Vec[ Op, nb_unknowns ]()
+    # #
+    # for i in 0 .. nb_unknowns
+        # d := expr.diff( unknowns[i] )
+        # for j in 0 .. i+1
+            # M[i,j] = d.diff( unknowns[j] )
+        # V[i] = - d
+    # #
+    # for i in 0 .. nb_unknowns
+        # V[i] = V[i].subs( unknowns, old_values )
+        # for j in 0 .. i+1
+            # M[i,j] = M[i,j].subs( unknowns, old_values )
+    # #
+    # return Vec[Op]( old_values + M \ V )
+    tmp_unk  := Vec[Op]( size = unknowns.size, function = x => symbol("t_$x") )
+    tmp_expr := expr.subs( unknowns, old_values + tmp_unk )
+    qe := quadratic_expansion( tmp_expr, tmp_unk )
+    #
+    l := lu( qe.m, assume_matrix_is_factorizable )
+    return Vec[Op]( old_values - l * qe.v )
+
+#~
+    newton_raphson_minimize_iteration_rec( (a-1)^4, [a], 1 )
+~#
+def newton_raphson_minimize_iteration_rec( expr, unknowns, nb_iter, old_values = Vec[Op,unknowns.size]( default_value = 0 ) )
+    if nb_iter <= 1
+        return newton_raphson_minimize_iteration( expr, unknowns, old_values )
+    return newton_raphson_minimize_iteration( expr, unknowns, newton_raphson_minimize_iteration_rec( expr, unknowns, nb_iter-1, old_values ) )
+
+
+#~
+Cette fonction retourne l'expression d'un itération de l'algorithme de Newton pour la résolution d'une équation ou d'un système linéaire ou non.
+    newton_raphson_iteration( [a-1,2*b-a], [a,b] )
+        -> [ 1, 1/2 ]
+~#
+def newton_raphson_iteration( equations, unknowns, old_values = Vec[Op,unknowns.size]( default_value = 0 ), assume_matrix_is_factorizable = true )
+    if unknowns.tensor_order <= 0
+        return newton_raphson_iteration( equations, [unknowns], old_values )
+    #
+    nb_unknowns  := unknowns.size
+    nb_equations := equations.size
+    M := Mat[ Op, Gen[nb_equations,nb_unknowns] ]()
+    V := Vec[ Op, nb_equations ]( -equations )
+    #
+    for i in 0 .. nb_equations
+        for j in 0 .. nb_unknowns
+            M[i,j] = equations[i].diff( unknowns[j] )
+    #
+    for i in 0 .. nb_equations
+        for j in 0 .. nb_unknowns
+            V[i] += M[i,j] * unknowns[j]
+    #
+    for n, v in unknowns, old_values
+        for i in 0 .. nb_unknowns
+            V[i] = V[i].subs( n, v )
+            for j in 0 .. i+1
+                M[i,j] = M[i,j].subs( n, v )
+
+    return lu( M, assume_matrix_is_factorizable ) * V
+
+#
+def make_poly_fit( expr, var, beg, end, degre )
+    return __make_poly_fit__( expr, Op( var ), Op( beg ), Op( end ), Int32( degre ) )
+
+
+# ----------------------------------------------------------------------------------------------
+
+#
+def polynomial_expansion( expressions, var, order )
+    v_expressions := VarArgs()
+    for e in expressions
+        v_expressions.push_unnamed( e )
+    v_res := VarArgs()
+    for i in 0 .. expressions.size * ( order + 1 )
+        v_res.push_unnamed( Op( 0 ) )
+    polynomial_expansion_( v_expressions, var, Int32(order), v_res )
+    #
+    res := Vec[Vec[Op,order+1]]( size = expressions.size )
+    for c in 0 .. expressions.size
+        res[ c ] = v_res[ c * ( order + 1 ) .. ( c + 1 ) * ( order + 1 ) ]
+    return res
+
+
+#
+def polynomial_expansion( expr, var, order ) when expr.tensor_order <= 0
+    res := polynomial_expansion( [ expr ], var, order )
+    vec := res[ 0 ]
+    return vec
+
+
+# ----------------------------------------------------------------------------------------------
+# s + < v, x > + x^T m x
+class QuadraticExpansionItem[ T = Op ]
+    def apply( vec )
+        t := Vec[Op](vec)
+        return s + dot( t, v ) + dot( t, m * t ) / 2
+    m := Mat[ T, Sym ]()
+    v := Vec[ T ]()
+    s := T()
+
+#
+def quadratic_expansion( expressions, variables )
+    #
+    v_expressions := VarArgs()
+    for e in expressions
+        v_expressions.push_unnamed( e )
+    s := variables.size
+    n := s * ( s + 1 ) / 2 + s + 1
+    #
+    v_variables := VarArgs()
+    for v in variables
+        v_variables.push_unnamed( v )
+    #
+    v_res := VarArgs()
+    for i in 0 .. expressions.size * n
+        v_res.push_unnamed( Op( 0 ) )
+    quadratic_expansion_( v_expressions, v_variables, v_res )
+    #
+    res := Vec[QuadraticExpansionItem[Op]]()
+    cpt := 0
+    for c in 0 .. expressions.size
+        qe := res.push_back()
+        qe->m.resize( variables.size )
+        qe->v.resize( variables.size )
+        #
+        qe->s = v_res[ cpt++ ]
+        for nv in 0 .. variables.size
+            qe->v[ nv ] = v_res[ cpt++ ]
+        for i in 0 .. variables.size
+            for j in 0 .. i + 1
+                qe->m[ i, j ] = v_res[ cpt++ ]
+    return res
+
+
+#
+def quadratic_expansion( expr, variables ) when expr.tensor_order <= 0
+    res := quadratic_expansion( [ expr ], variables )
+    vec := res[ 0 ]
+    return vec
+
+
+#~
+sa := symbol("sa")
+sb := symbol("sb")
+
+b := Float64( 0 )
+# c := Float64( 0 )
+# d := Float64( 0 )
+
+pa := Float64( -100 )
+pb := Float64( 5 )
+
+expr := Op( 1 )
+for i in 0 .. 5
+    expr *= i / 10 - sa
+info expr
+# expr = abs( sa )
+
+g := AsmWriter()
+g.add_association( sa, &pa )
+g.add_association( sb, &pb )
+
+g.add( &b, expr, reassign )
+# g.display_graphviz()
+
+code := g.to_code()
+
+code.execute()
+
+info b, Float64( expr.subs( sa, pa ) )
+# info c
+# info d
+~#
+class AsmWriter
+    class Code
+        p := UntypedPtr( NULL )
+
+        # def destroy
+            # p.free()
+
+        def execute
+            exec_untyped_ptr_function( p )
+
+    aw ~= AsmWriter_
+
+    def init()
+        aw.init()
+
+    def add( ptr_res, expr, method )
+        aw.add_expr( UntypedPtr(ptr_res), Op(expr), method )
+        return self
+
+    def add( ptr_res, expr, method ) when expr.tensor_order > 0
+        for key,val in expr
+            add(&(@ptr_res)[key] , val , method)
+        return self
+
+    def add_association( op_symbol, pointer )
+        aw.add_association( op_symbol, UntypedPtr(pointer), pointer.T )
+        return self
+
+    def add_association( vec_symbol, pointer ) when vec_symbol.tensor_order == 1
+        cpt := 0
+        for op_1 in vec_symbol
+            add_association( op_1 , &(@pointer)[cpt] )
+            cpt += 1
+        return self
+
+    def add_association( mat_symbol, pointer ) when mat_symbol.tensor_order == 2
+        for i in 0 .. mat_symbol.nb_rows
+            for j in 0 .. mat_symbol.nb_cols
+                add_association( mat_symbol[i,j], &(@pointer)[i,j] )
+        return self
+
+    def to_code
+        return Code( p = aw.to_code() )
+
+    def graphviz_string()
+        return aw.to_graphviz()
+
+    def display_graphviz( f = ".res" )
+        o := File("$f.dot","w")
+        o <<< "digraph toto {"
+        o <<< graphviz_string()
+        o <<< "}"
+        o.close()
+
+        system( "dot -Tpdf $f.dot > $f.pdf; okular $f.pdf" )

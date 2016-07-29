@@ -1,0 +1,32 @@
+
+#~
+    dense sub block
+~#
+class LazyMatPartFull[ T, ST, Prop = Void ] inherits LazyMatPart[ ST ]
+    # row_data
+    data := Ptr[ T ]( NULL )
+    real_nb_cols := ST( 0 )
+
+    virtual def select( i, j )
+        if not s->done
+            ls := LazySimpleScheduler( [ &self ] ); ls.execute()
+        return data[ i * real_nb_cols + j ]
+        
+    virtual def allocate
+        assert( not data, "?" )
+        data = malloc( T.byte_size * real_nb_cols * nb_rows )
+    
+    virtual def free
+        if data
+            data.free()
+            data = NULL
+    
+    virtual def get_done
+        return Bool( data )
+
+    virtual def get_ScalarType
+        return T
+
+#~
+~#
+

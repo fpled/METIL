@@ -1,0 +1,77 @@
+
+#~
+~#
+class LazyOperatorFieldProjection[ T, TE, Pvec ] inherits LazyVecPart[ T, SizeType ]
+    static cpp_func ~= CppCompiledFunctionSet_
+    static make_proj := UntypedPtr( NULL )
+    
+    virtual def evaluate
+        if not make_proj
+            cpp_func.init( self )
+            make_proj = cpp_func[ "make_proj" ]
+        elem_list := child_cast( children[0] )
+        sub_pos   := child_cast( children[1] )
+        sub_val   := child_cast( children[2] )
+        old_pos   := child_cast( children[3] )
+        
+        exec_ccode_function( make_proj, data, elem_list->data, elem_list->size, old_pos->data, sub_pos->data, sub_val->data, size )
+        
+            
+    virtual def write_to_stream( stream )
+        stream << "Proj"
+            
+    def get_src( stream )
+        elem := ref TE::sym_elt
+        
+        var_inter_and_validity := CodeWriter( "T" )
+        P := Vec[Op,T::static_size]( x => symbol("P[$x]") )
+        var_inter := elem.var_inter_for_pos  ( P )
+        for v, cpt in var_inter, 0...
+            var_inter_and_validity.add( "var_inter_$cpt", v, init )
+        validity := elem.var_inter_is_inside( var_inter, 1e-3 )
+        var_inter_and_validity.add( "validity", validity, init )
+        
+        set_res := CodeWriter( "T" )
+        for j in 0 .. T::static_size
+            val_on_nodes := Vec[Op]()
+            for n in 0 .. elem.nb_nodes
+                val_on_nodes.push_back( symbol("val[ IND($n) ][$j]" ) )
+            var_inter := Vec[Op]()
+            for n in 0 .. elem.nvi
+                var_inter.push_back( symbol("var_inter_$n" ) )
+            set_res.add( "res[n][$j]", elem.pe.interpolation( var_inter, val_on_nodes ), reassign )
+        
+        stream <<<< 
+            #include <iostream>
+            #include <cmath>
+            template<class T> T heaviside(T val) { return val>=0; }
+            template<class TR,class TE,class Pvec,class ST> void make_proj( TR *res, TE *elems, ST nb_elems, Pvec *pos, Pvec *new_pos, TR *val, ST nb_nodes ) {
+                typedef typename TR::T T;
+                for(unsigned n=0;n<nb_nodes;++n) {
+                    Pvec &P = new_pos[n];
+                    for(unsigned j=0;j<TR::static_size;++j)
+                        res[n][j] = -1;
+                    for(unsigned ne=0;ne<nb_elems;++ne) {
+                        TE &elem = elems[ne];
+                        #define IND(n) elem.ind[n].index
+            $( var_inter_and_validity.to_string( 12 ) )
+                        if ( validity ) {
+            $( set_res.to_string( 16 ) )
+                            //for(unsigned j=0;j<TR::static_size;++j)
+                            //    res[n][j] = ne;
+                            break;
+                        }
+                        #undef IND
+                    }
+                    //TE &elem = e[ ne ];
+                    //TP *pos = &pos0;
+                }
+            }
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "make_proj", [ Ptr[T], Ptr[TE], ST, Ptr[Pvec], Ptr[Pvec], Ptr[T], ST ] )
+        ]
+    
+    def get_control_sum
+        return 10

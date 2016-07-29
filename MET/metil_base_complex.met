@@ -1,0 +1,128 @@
+class Complex[ T ]
+    property is_a_number, is_a_complex_number
+    
+    real := T(0)
+    imag := T(0)
+    
+    def init( r, i = T(0) ) when r.is_a_number and i.is_a_number and r.is_a_complex_number==false and i.is_a_complex_number==false
+        real.init( r )
+        imag.init( i )
+    
+    def reassign( r, i = T(0) ) when r.is_a_number and i.is_a_number and r.is_a_complex_number==false and i.is_a_complex_number==false
+        real = r
+        imag = i
+        
+    def write_to_stream( stream )
+        if assumed( imag > 0 ) or not assumed( imag == 0 )
+            stream << real << "+" << imag << "i"
+        else if assumed( imag < 0 )
+            stream << real << "-" << (-imag) << "i"
+        else 
+            stream << real
+        
+    def get_arg
+        return atan2( imag, real )
+        
+    def get_modulus
+        return real^2 + imag^2
+        
+    def get_scalar_type pertinence 2
+        return T
+
+def get_real( self ) when self.is_a_number
+    return self
+        
+def get_imag( self ) when self.is_a_number
+    return 0
+
+def get_scalar_type( self ) when self.is_a_number
+    return type_of( self )
+    
+def type_promote( a, b, op ) when a.is_a_complex_number and b.is_a_number and b.is_a_complex_number==false
+        return Complex[ type_promote(a.real,b,op) ]
+
+def type_promote( b, a, op ) when a.is_a_complex_number and b.is_a_number and b.is_a_complex_number==false
+        return Complex[ type_promote(b,a.real,op) ]
+        
+def add( a, b ) when a.is_a_complex_number and b.is_a_complex_number pertinence 10
+    return Complex[ type_promote(a.real,b.real,add) ]( a.real + b.real, a.imag + b.imag )
+
+def sub( a, b ) when a.is_a_complex_number and b.is_a_complex_number pertinence 10
+    return Complex[ type_promote(a.real,b.real,add) ]( a.real - b.real, a.imag - b.imag )
+
+def mul( a, b ) when a.is_a_complex_number and b.is_a_complex_number pertinence 10
+    return Complex[ type_promote(a.real,b.real,add) ]( a.real * b.real - a.imag * b.imag, a.imag * b.real + a.real * b.imag )
+
+def div( a, b ) when a.is_a_complex_number and b.is_a_complex_number pertinence 10
+    den := b.real^2 + b.imag^2
+    return Complex[ type_promote(a.real,b.real,add) ]( ( a.real * b.real + a.imag * b.imag ) / den, ( a.imag * b.real - a.real * b.imag ) / den )
+
+def trans( a ) when a.is_a_complex_number
+    return a.type( a.real, - a.imag )
+
+def trans( a ) when a.is_a_number
+    return a
+
+def conj( a ) when a.is_a_complex_number
+    return a.type( a.real, - a.imag )
+
+def conj( a ) when a.is_a_number
+    return a
+
+def sub( a ) when a.is_a_complex_number
+    return Complex[ a.T ]( - a.real, - a.imag )
+
+## sqrt(real) that returns a complex number ##
+def sqrtc( a ) when a.is_a_number and not a.is_a_complex_number
+    C := Complex[ type_of(a) ]
+    sa := sqrt(abs(a))
+    co := ( a >= 0 )
+    return C( sa * co, sa * ( 1 - co ) )
+
+## sqrt(real) that returns a complex number ##
+def sqrtc( a ) when a.is_a_number and a.is_a_complex_number
+    return sqrt( a )
+    
+## ##
+def exp( a ) when a.is_a_complex_number
+    return exp( a.real ) * ( cos( a.imag ) + a.type( 0, 1 ) * sin( a.imag ) )
+
+## ##
+def eqz( a ) when a.is_a_complex_number
+    return eqz( a.real ) * eqz( a.imag )
+
+## ##
+def abs( a ) when a.is_a_complex_number
+    return sqrt( a.real^2 + a.imag^2 )
+
+
+## sqrt(real) that returns a complex number ##
+def pow( a, b ) when a.is_a_complex_number and b.is_a_number and not b.is_a_complex_number
+    C := Complex[ type_promote( partial_instanciation a.T, b, mul ) ]
+    m := a.modulus
+    return exp( b * C( log( m + (m==0) ) / 2, a.arg ) ) * ( m > 0 )
+    
+## sqrt(real) that returns a complex number ##
+def pow( a, b ) when a.is_a_complex_number and b.is_a_complex_number
+    C := Complex[ type_promote( partial_instanciation a.T, partial_instanciation b.T, mul ) ]
+    a_arg := a.arg; a_mod := a.modulus
+    t := b.real * a_arg + 0.5 * b.imag * log( a_mod )
+    return pow( a_mod, b.real / 2 ) * exp( - b.imag * a_arg ) * C( cos(t), sin(t) )
+    
+##  ##
+def equal( a, b ) when a.is_a_complex_number and b.is_a_complex_number
+    return ( a.real == b.real ) * ( a.imag == b.imag )
+    
+##  ##
+def not_equal( a, b ) when a.is_a_complex_number and b.is_a_complex_number
+    return 1 - ( a.real == b.real ) * ( a.imag == b.imag )
+    
+    
+# 
+def diff( self, var ) when self.is_a_complex_number
+    return Complex[ Op ](
+        self.real.diff( var ),
+        self.imag.diff( var )
+    )
+    
+    

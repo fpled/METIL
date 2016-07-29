@@ -1,0 +1,10 @@
+class Argv
+    static const tensor_order := 1
+    def get_size    return __argv__size__()
+    def select( n ) when n.is_a_number
+        return __argv__item__( Int32(n) )
+    def __for__( block )
+        for i in 0 .. __argv__size__()
+            block( __argv__item__( i ) )
+            
+const argv := Argv()

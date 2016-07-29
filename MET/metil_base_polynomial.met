@@ -1,0 +1,193 @@
+#~
+~#
+class Poly[ T, static_order=-1 ]
+    property is_a_polynomial
+    static const static_size := ( static_order + 1 ) * ( static_order >= 0 ) - ( static_order < 0 )
+    static const default_order := static_order * ( static_order >= 0 )
+    static const C := Complex[ T::scalar_type ]
+    
+    coeffs := Vec[ T, static_size ]( size = default_order + 1, function = (x => T(0)) )
+    
+    def init( p ) when p.is_a_polynomial
+        coeffs.init( p.coeffs ) 
+        
+    def init( va ) when va.tensor_order==1
+        coeffs.init( size = max(va.size,static_size) )
+        for i in 0 .. va.size
+            coeffs[i].init( va[i] )
+        for i in va.size .. static_size
+            coeffs[i].init( 0 )
+            
+    def init( varargs ) when varargs.nb_named_arguments()==0 pertinence 0.5
+        init( varargs )
+    
+    def init( order ) pertinence 0
+        coeffs.init( size = order + 1 )
+        
+    def init( op, var, order = default_order ) pertinence 0
+        coeffs.init( size = order+1 )
+        n := 1; d := op
+        for i in 0 .. order + 1
+            if T == Op
+                coeffs[i].init( d.subs( var, 0 ) / n )
+            else
+                coeffs[i].init( d( 0 ) / n )
+            d = d.diff( var )
+            n *= i+1
+    
+    def get_order
+        return coeffs.size - 1
+    
+    def get_assumed_actual_order
+        return coeffs.index_of_last_item_that_checks( x => not assumed(x==0) )
+        
+    def apply( x )
+        return sum( (0 .. coeffs.size).map( coeffs[_0] * x ** _0 ) )
+    
+    def get_derivative
+        res := Poly[ T, max( static_order - 1, 0 ) ]( order = max( get_order()-1, 0 ) )
+        for i in 0 .. res.coeffs.size
+            res.coeffs[i] = coeffs[i+1] * (i+1)
+        return res
+        
+    class PolyRoot[ C, T ]
+        value := C(0)
+        validity := T::scalar_type(0)
+        def select( n )
+            if n
+                return validity
+            return value
+            
+    def get_roots
+        rorder := get_assumed_actual_order()
+        assert( rorder <= 4, "TODO : roots of poly with order > 4" )
+        res := Vec[ PolyRoot[C,T] ]( size = rorder )
+        validity := T::scalar_type(1)
+        for i in ( 1 .. rorder+1 ).reversed
+            ret_roots( i, res, ( coeffs[ i ] != 0 ) * validity )
+            validity *= coeffs[ i ] == 0
+        return res
+    
+    class PolyRealRoot[T]
+        value := T(0)
+        validity := T(0)
+        def select( n )
+            if n
+                return validity
+            return value
+    def get_real_roots
+        res_c := get_roots()
+        max_root_cmp := 1e-6 * max( res_c.map( x => abs(x.value) ) ) # TODO : better criterium
+        res := Vec[ PolyRealRoot[T] ]( size = res_c.size )
+        for i in 0 .. res_c.size
+            res[i].value = res_c[i].value.real
+            res[i].validity = res_c[i].validity * ( abs(res_c[i].value.imag) < max_root_cmp )
+        return res
+
+    # # méthode de Ferrari (voir http://fr.wikipedia.org/wiki/Méthode_de_Ferrari )
+    def ret_roots( n, res, validity ) when n == 4
+        tmp := 1/ (coeffs[4] + eqz(coeffs[4]) )  
+        b   := coeffs[3]*tmp
+        c   := coeffs[2]*tmp
+        d   := coeffs[1]*tmp
+        e   := coeffs[0]*tmp
+        del := b/4
+        b2  := b^2
+        b3  := b2*b
+        p   := -3*b2/8+c
+        q   := b3/8 - b*c/2 + d
+        r   := -3*b2*b2/256 + c*del*del - del*d + e
+        disc :=     Poly[T,3](4*r*p-q*q,-8*r,-4*p,8)
+        r_disc := disc.get_real_roots(); # on a au moins une solution réelle car deg(disc) = 3
+        rac := r_disc[0].validity*r_disc[0].value + (1-r_disc[0].validity)*(r_disc[1].validity*r_disc[1].value+(1-r_disc[1].validity)*(r_disc[2].validity*r_disc[2].value))
+        a0  := -sqrtc(C(2*rac-p,0))
+        b0  := -q/(a0*2)
+        p1  := Poly[C,2](b0+rac,a0,1)
+        p2  := Poly[C,2](rac-b0,-a0,1)
+        z1  := p1.get_roots()  
+        z2  := p2.get_roots()
+        res[0].validity += validity * z1[0].validity
+        res[1].validity += validity * z1[1].validity
+        res[2].validity += validity * z2[0].validity
+        res[3].validity += validity * z2[1].validity
+        res[0].value += ( z1[0].value-del ) * validity
+        res[1].value += ( z1[1].value-del ) * validity
+        res[2].value += ( z2[0].value-del ) * validity
+        res[3].value += ( z2[1].value-del ) * validity 
+
+    def ret_roots( n, res, validity ) when n == 3
+        c3 := coeffs[3] + eqz( coeffs[3])
+        c := coeffs[0] / c3; b := coeffs[1] / c3; a := coeffs[2] / c3
+        
+        eps := 1e-10 * max(abs(coeffs)) # TODO -> T use (Op case)
+        p := b - a^2 / 3
+        q := c + ( 2 * a^3 - 9 * a * b ) / 27
+        det_sq := q^2 / 4 + p^3 / 27
+        det := sqrtc(det_sq)
+        u_0_3 := q / 2 + det
+        u_0_3_n := abs( u_0_3 ) >= eps
+        u_0_3 = u_0_3 * u_0_3_n + ( q / 2 - det ) * ( 1 - u_0_3_n )
+        
+        u_0 := u_0_3 ^ (1/3)
+        triple_root := abs(u_0_3) < eps
+        u_p := u_0 + triple_root
+        s_32 := sqrt(T(3)) / 2
+        f := p / _0 / 3 - _0 - a / 3
+        roots_if_not_triple := [ f(u_p), f(u_p*C(-0.5,s_32)), f(u_p*C(-0.5,-s_32)) ] * ( 1 - triple_root )
+        root_if_triple := - a / 3 * triple_root
+        
+        for i in 0..3
+            res[i].value += ( root_if_triple + roots_if_not_triple[i] ) * validity
+            res[i].validity += validity
+    
+    def ret_roots( n, res, validity ) when n == 2
+        det_sq := coeffs[1]^2 - 4 * coeffs[0] * coeffs[2]
+        c2 := coeffs[2] + eqz( coeffs[2] )
+        delta := sqrtc( det_sq )
+        res[0].value += ( 0.5 * ( - coeffs[1] + delta ) / c2 ) * validity
+        res[0].validity += validity
+        res[1].value += ( 0.5 * ( - coeffs[1] - delta ) / c2 ) * validity
+        res[1].validity += validity
+    
+    def ret_roots( n, res, validity ) when n == 1
+        res[0].value -= ( coeffs[0] / ( coeffs[1] + eqz( coeffs[1] ) ) ) * validity
+        res[0].validity = heaviside( res[0].validity + validity )
+
+    static def make_test
+        for v in rectilinear( -2 .. 3, static_order + 1 )
+            p := Poly[ Float64, static_order ]( v )
+            r := p.roots
+            for vr, validity in r
+                if validity and abs(p(vr)) > 1e-6
+                    info p.coeffs
+                    info vr
+                    info p(vr)
+                    plot( (-200 .. 200)/100, p )
+                    return 0
+        n := 3
+        for i in rectilinear( -2 .. 3, n )
+            s := symbol("s")
+            p := Poly[ Float96, n ]( op = (s-i[0])*(s-i[1])*(s-i[2]), var = s )
+            rr := p.real_roots.map( x => x[0] )
+            assert( all( p.roots.map( x => x[1] ) ), "mm" )
+            su := sum( i ) - sum( rr )
+            pr := product( i ) - product( rr )
+            if abs(su) > 1e-6 or abs(pr) > 1e-6
+                info p.coeffs
+                info p.rr
+
+
+def resultant( P, Q ) when P.is_a_polynomial and Q.is_a_polynomial
+    Ps := P.assumed_actual_order
+    Qs := Q.assumed_actual_order
+    s := Ps + Qs
+    T := type_promote( P.coeffs[0], Q.coeffs[0], add ) # TODO...
+    m := Mat[ T, Gen[s,s] ]( default_value = 0 )
+    for i in 0 .. Qs
+        for j in 0 .. Ps + 1
+            m[ i, i+j ] = P.coeffs.reversed[j]
+    for i in 0 .. Ps
+        for j in 0 .. Qs + 1
+            m[ Qs+i, i+j ] = Q.coeffs.reversed[j]
+    return m.det
+    

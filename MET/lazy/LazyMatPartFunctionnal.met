@@ -1,0 +1,30 @@
+
+#~
+~#
+class LazyMatPartFunctionnal[ T, ST, TF ] inherits LazyMatPart[ ST ]
+    function := TF()
+    
+    def init( function )
+        init_lazy_obj()
+        self.function.init( function )
+        
+    virtual def select( i, j ) return function([ i, j ])
+    virtual def get_done       return true
+    virtual def allocate       pass
+    virtual def free           pass
+    
+    virtual def write_to_stream( stream )
+        stream << "Mat(x=>$function)"
+    
+    virtual def get_ScalarType
+        return T
+
+#~
+~#
+def new_LazyMatPartFunctionnal( T, ST, nb_rows, nb_cols, function )
+    # else -> create a new one
+    res := new LazyMatPartFunctionnal[ T, ST, type_of( function ) ]( function )
+    res->nb_rows = nb_rows
+    res->nb_cols = nb_cols
+    return res
+    

@@ -1,0 +1,244 @@
+# unsigned number of arbitrary length
+class BigUnsigned[ T = Int32, static_base = 2 ^ (T::nb_bits_in_mantissa//2-1) ]
+    property is_a_BigUnsigned, is_a_number
+    static const nb_bits_in_mantissa := Int32::max_representable
+    static const is_a_signed_number := false
+    static const default_base := 2 ^ (T::nb_bits_in_mantissa//2)
+    
+    val := T( 0 )   # -> val + base * ada[0] + base^2 * ada[1] + ... 
+    ada := Vec[T]() # additionnal integers
+    base := StaticValIf[ static_base > 0, static_base, T ]()
+    
+    def init( a, base = static_base ) when a.is_a_BigUnsigned==false or @a.base != base
+        assert( a >= 0, "BigUnsigned( negative_number ) is forbidden" )
+        self.base.init_value( base )
+        if a.is_a_BigUnsigned and @a.base == base
+            val.init( a.val )
+            ada.init( a.ada )
+        else
+            cp := a
+            s_ada := 0
+            while cp >= base
+                s_ada++
+                cp //= base
+            ada.init( size = s_ada )
+            #
+            if a.is_a_BigUnsigned
+                val.init( ( a % base ).to_type(T) )
+            else
+                val.init( a % base )
+            cp = a
+            for i in 0 .. s_ada
+                cp //= base
+                if cp.is_a_BigUnsigned
+                    ada[i].init( ( cp % base ).to_type(T) )
+                else
+                    ada[i].init( cp % base )
+    def init( single, base = static_base ) when single.is_a_BigUnsigned==false pertinence 0
+        val.init( single )
+        ada.init()
+        self.base.init_value( base )
+    def reassign( b )
+        self.destroy()
+        self.init( b )
+    def conversion_to( b ) when b.type == Bool
+        b.init( val or ada.size )
+    def conversion_to( b ) when b.is_a_float_number
+        b.init( 0 )
+        for v in ada.reversed
+            b = b * @base + v
+        b = b * @base + val
+    def rm_zeroes_at_end
+        ada.size = ada.index_of_last_item_that_checks( _0 != 0, -1 ) + 1
+    def mul_by_base_pow( o )
+        n := o
+        while n-- > 0
+            ada.push_front( val )
+            val = 0
+    def to_type( TR )
+        res := TR( val ); m := TR( @base )
+        for a in ada
+            res += a * m
+            m *= @base
+        return res
+    def get_back
+        if ada.size
+            return ada.back
+        return val
+    def __for__( block )
+        block( val )
+        for v in ada
+            block( v )
+    def write_to_stream( stream )
+        if @base == stream.options.base
+            stream << join(ada.reversed,"") << val
+        else
+            stream << BigUnsigned[T,##dynamic##0]( self, base = stream.options.base )
+
+class ZipBigUnsigned[BU]
+    static const T := BU::T
+    pa := Ptr[BU]()
+    pb := Ptr[BU]()
+    def __for__( block )
+        block( ( pa->val, pb->val ) )
+        m := min( pa->ada.size, pb->ada.size )
+        for i in 0 .. m
+            block( ( pa->ada[i], pb->ada[i] ) )
+        for i in m .. pa->ada.size
+            block( ( pa->ada[i], T(0) ) )
+        for i in m .. pb->ada.size
+            block( ( T(0), pa->ada[i] ) )
+def zip_bu( a, b )  return ZipBigUnsigned[type_of(a)]( pa = pointer_on(a), pb = pointer_on(b) )
+
+#
+def inferior( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    if a.ada.size < b.ada.size  return true
+    if a.ada.size > b.ada.size  return false
+    for va, vb in zip( a.ada, b.ada ).reversed
+        if va < vb  return true
+        if va > vb  return false
+    return a.val < b.val
+#
+def superior_equal( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    return not inferior( a, b )
+#
+def equal( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    if a.ada.size != b.ada.size  return false
+    for va, vb in zip( a.ada, b.ada ).reversed
+        if va != vb  return false
+    return a.val == b.val
+#
+def inferior_equal( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    if a.ada.size < b.ada.size  return true
+    if a.ada.size > b.ada.size  return false
+    for va, vb in zip( a.ada, b.ada ).reversed
+        if va < vb  return true
+        if va > vb  return false
+    return a.val <= b.val
+
+#
+def add( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    if a.ada.size < b.ada.size
+        return add( b, a )
+    res := a
+    base := @res.base
+    #
+    ret := false
+    for pr, pb in zip_bu( res, b )
+        pr += pb + ret
+        ret = pr >= base
+        if ret  pr -= base
+    if ret
+        res.ada.push_back( 1 )
+    return res
+
+# assumes that a > b
+def sub( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    res := a
+    base := @res.base
+    #
+    ret := false
+    for pr, pb in zip_bu( res, b )
+        pr -= pb + ret
+        ret = pr < 0
+        if ret  pr += base
+    assert( not ret, "sub(BigUnsigned,BigUnsigned) must give a BigUnsigned" )
+    res.rm_zeroes_at_end()
+    return res
+
+#
+def mul( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    def partial_mul( a, pb, n )
+        tmp := a; ret := a.T(0); base := @a.base
+        for t in tmp
+            t = t * pb + ret
+            ret = t // base
+            t -= ret * base
+        if ret
+            tmp.ada.push_back( ret )
+        tmp.mul_by_base_pow( n )
+        return tmp
+    res := partial_mul( a, b.val, 0 )
+    for pb, n in b.ada, 1...
+        res += partial_mul( a, pb, n )
+    return res
+
+# a is modified to give rem
+def div_int_rem( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    BU := BigUnsigned[ type_promote(a.val,b.val,div_int), max( a.static_base, b.static_base ) ]
+    # when n == 0 (no extension)
+    if a.ada.size == 0 and b.ada.size == 0
+        s := a.val // b.val
+        a.val %= b.val
+        return BU( single = s )
+    # Ex : 12 / 123
+    if a < b
+        return BU( single = 0 )
+    
+    # as in school
+    res := BU( single = 0 )
+    while a.ada.size > b.ada.size + 1
+        tmp := b
+        o := a.ada.size - tmp.ada.size - 1 + (tmp.back < a.back)
+        tmp.mul_by_base_pow( o )
+        mult_tot := BU( single = 0 )
+        while a >= tmp
+            m := a.back
+            if a.ada.size != tmp.ada.size
+                m *= @a.base
+            m //= tmp.back * 2
+            if m > 1
+                a -= m * tmp
+                mult_tot += m
+            else
+                a -= tmp
+                mult_tot += 1
+        mult_tot.mul_by_base_pow( o )
+        res += mult_tot
+    while a >= b
+        m := a.back
+        if a.ada.size != b.ada.size
+            m *= @a.base
+        m //= b.back * 2
+        if m > 1
+            a -= m * b
+            res += m
+        else
+            a -= b
+            res += 1
+    return res
+
+#
+def div_int( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    rem := a
+    return div_int_rem( rem, b )
+    def make_test
+        for i, j in rectilinear( 1..100, 1..100 )
+            assert( ( BU( i ) // j ).to_type(Int32) == i // j, "$i $j")
+#
+def mod( a, b ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned and @a.base==@b.base
+    rem := a
+    div_int_rem( rem, b )
+    return rem
+    
+# TODO -> ...
+def type_promote( a, b, op ) when a.is_a_BigUnsigned and b.is_a_number       pertinence 10   return a.type
+def type_promote( a, b, op ) when b.is_a_BigUnsigned and a.is_a_number       pertinence 10   return b.type
+def type_promote( a, b, op ) when a.is_a_BigUnsigned and b.is_a_BigUnsigned  pertinence 11
+    return BigUnsigned[ type_promote( partial_instanciation a.T, partial_instanciation b.T, op ), max(@a.base,@b.base) ]
+
+#~ greatest common divisor ~#
+def gcd( a_, b_ )
+    if b_.is_a_BigUnsigned and b_.val == 1 and b_.ada.size == 0
+        return 0
+        
+    a := a_; b := b_
+    while b
+        old := b
+        b = a % b
+        a = old
+    return a
+
+#~ lowest common multiple ~#
+def lcm( a, b )
+    return a * b // gcd( a, b )

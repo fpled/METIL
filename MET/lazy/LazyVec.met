@@ -1,0 +1,740 @@
+import "LazyScalar.met"
+import "CppCompiledFunctionSet.met"
+
+
+#~
+    Vector consisting of one or several LazyObject (sub-parts)
+    ExtraData -> type of extr attribute for each sub_vec
+    items_are_scalar -> TODO
+~#
+class LazyVec[ ST = SizeType, ExtraData = Int32, items_are_scalar = false ]
+    property is_a_LazyVec
+    static default_byte_size_of_sub_vec := 10e6
+    static const TSubVec := LazyVecPartAncestor[ ST, ExtraData ]
+    static const tensor_order := 1
+    
+    sub_vecs := Vec[ PtrWithCptUse[ TSubVec ] ]()
+    
+    # append sub lazy objects to scheduler
+    def apply_lazy_objects( op )
+        for s in sub_vecs
+            op( s )
+
+    #
+    def sub_vecs_push_back( v )
+        if items_are_scalar
+            TV := v->get_ScalarType()
+            assert( TV::tensor_order <= 0, "items_are_scalar == true means we dont wan't items of type $TV (tensor_order == $(TV::tensor_order))" )
+        sub_vecs.push_back( v )
+        
+    #
+    def assign_sub_vec( r, v )
+        if items_are_scalar
+            assert( v->get_ScalarType()::tensor_order <= 0 )
+        sub_vecs[ r ] = v
+    
+    #
+    def __for__( block )
+        for s in sub_vecs
+            for v in @s
+                block( v )
+    
+    # LazyVec( 0 .. 100 )
+    def init( r, n = default_byte_size_of_sub_vec ) when r.is_a_Range_vector pertinence 3
+        init_using_default_values( self )
+        b := r.begin; e := r.end; i := r.increment; T := type_of( b )
+        nb_item_per_sub_vec := default_byte_size_of_sub_vec // T.byte_size
+        while b + i <= e
+            ns := min( nb_item_per_sub_vec, ( e - b ) // i )
+            ll := new_lazy_leave( LazyVecPartOperatorRange[ T, ST ], b, b + i * ns, i )
+            sub_vecs_push_back( ll )
+            b += i * ns
+    
+    # 
+    def init( with_sub_vec ) pertinence -2
+        init_using_default_values( self )
+        sub_vecs.push_back( with_sub_vec )
+    
+    # LazyVec with cst value
+    def init( size, default_value ) pertinence -1
+        init_using_default_values( self )
+        sub_vecs_push_back( new LazyVecPartOperatorCstValue[ type_of( default_value ), ST ]( size, default_value ) )
+    
+    # LazyVec with cst value
+    def init( vec ) when vec.tensor_order == 1 and not vec.is_a_LazyVec pertinence 2
+        init_using_default_values( self )
+        T := vec.sub_type
+        sub_vecs_push_back( new LazyVecPartOperatorKnownVec[ T, ST, ExtraData ]( vec ) )
+    
+    #
+    def size_sub_vec( n )
+        return sub_vecs[ n ]->size
+
+    #
+    def select( r, one_sub_vec = false ) when r.is_a_Range_vector and r.increment == 1
+        res := self.type()
+        if not sub_vecs.size
+            return res
+        #
+        b := r.begin; e := r.end; ind := 0
+        if one_sub_vec
+            r := Ptr[ LazyVecPartAncestor[ ST, ExtraData ] ]( NULL )
+            while e and ind < sub_vecs.size
+                s := sub_vecs[ ind ]->size
+                if b < s
+                    tmp := Ptr[ LazyVecPartAncestor[ ST, ExtraData ] ]( NULL )
+                    if b == 0 and s <= e
+                        tmp = sub_vecs[ ind ]
+                    else
+                        T := sub_vecs[ ind ]->get_ScalarType()
+                        tmp = new LazyVecOperatorSubPart[ T, ST, ExtraData ]( sub_vecs[ ind ], b, min( s, e ) )
+                        b = 0
+                    if r
+                        T := type_promote( partial_instanciation r->get_ScalarType(), partial_instanciation tmp->get_ScalarType(), add )
+                        r = new LazyVecOperatorConcat[ T, ST, ExtraData ]( r, tmp )
+                    else
+                        r = tmp
+                    e -= min( s, e )
+                ind++
+            if r
+                res.sub_vecs.push_back( r )
+        else
+            while e
+                s := sub_vecs[ ind ]->size
+                if b < s
+                    if b == 0 and s <= e
+                        res.sub_vecs.push_back( sub_vecs[ ind ] )
+                    else
+                        T := sub_vecs[ ind ]->get_ScalarType()
+                        res.sub_vecs.push_back( new LazyVecOperatorSubPart[ T, ST, ExtraData ]( sub_vecs[ ind ], b, min( s, e ) ) )
+                        b = 0
+                    e -= min( s, e )
+                ind++
+        #
+        return res
+    
+    #~
+        
+    ~#
+    def partitionned( partition )
+        res := self.type()
+        for p in 0 .. partition.size - 1
+            tmp := self[ partition[p] .. partition[p+1], one_sub_vec = true ]
+            if tmp.sub_vecs.size
+                res.sub_vecs.push_back( tmp.sub_vecs[0] )
+        return res
+    
+    #
+    def conversion_to( vec ) when vec.tensor_order == 1
+        vec.init( size = get_size() )
+        d := UntypedPtr( vec.begin )
+        for s in sub_vecs
+            if not s->done
+                ls := LazySimpleScheduler( [ s.ptr ] ); ls.execute()
+            c := child_cast( s )
+            si := c->size * c->get_ScalarType().byte_size
+            memcpy( d, UntypedPtr( c->data ), 8, si )
+            d += si
+    #
+    def get_size
+        res := ST( 0 )
+        for s in sub_vecs
+            # TODO : type check
+            res += s->size
+        return res
+    
+    #
+    def get_sub_types
+        lst := Set[ Def ]()
+        for s in sub_vecs
+            lst.insert( s->get_ScalarType() )
+        return lst
+
+    #
+    def get_size_in_memory
+        res := ST( 0 )
+        for s in sub_vecs
+            res += s->size * s->get_ScalarType().byte_size
+        return res
+        
+    #
+    def select( n )
+        # stack_info()
+        n_ := n
+        for s in sub_vecs
+            if n_ < s->size
+                if not s->done
+                    ls := LazySimpleScheduler( [ s.ptr ] ); ls.execute()
+                return s->select( n_ )
+            n_ -= s->size
+
+    #
+    def get_additional_cpp_methods
+        res := ""
+        res <<<<
+                template<class TT> TT &get_val( ST i ) {
+                    ST ind = 0;
+                    while ( i >= sub_vecs[ind].ptr->size ) {
+                        i -= sub_vecs[ind].ptr->size;
+                        ++ind;
+                    }
+                    TT *d = *reinterpret_cast<TT **>( sub_vecs[ind].ptr + 1 );
+                    return d[ i ];
+                }
+                ST size() const {
+                    ST res = 0;
+                    for(ST i=0;i<sub_vecs.size();++i)
+                        res += sub_vecs[i].ptr->size;
+                    return res;
+                }
+        return res
+
+#
+def type_promote( a, b, op ) when a.is_a_LazyVec and b.is_a_number
+    return LazyVec[ a.ST ]
+#
+def type_promote( a, b, op ) when b.is_a_LazyVec and a.is_a_number
+    return LazyVec[ a.ST ]
+
+#
+def op_with_ret_using_type_promote( a, b, op ) when a.is_a_number and b.is_a_LazyVec
+    tmp := LazyVec()
+    tmp.sub_vecs.reserve( b.sub_vecs.size )
+    for s in b.sub_vecs
+        tmp.sub_vecs_push_back( new LazyVecPartOperatorCstValue[ type_of( a ), b.ST ]( s->size, a ) )
+    #
+    return op( tmp, b )
+
+#
+def op_with_ret_using_type_promote( a, b, op ) when a.is_a_LazyVec and b.is_a_number
+    tmp := LazyVec()
+    tmp.sub_vecs.reserve( a.sub_vecs.size )
+    for s in a.sub_vecs
+        tmp.sub_vecs_push_back( new LazyVecPartOperatorCstValue[ type_of( b ), a.ST ]( s->size, b ) )
+    #
+    return op( a, tmp )
+
+
+#~
+~#
+class LazyVecPartAncestor[ ST, ExtraData = Int32 ] inherits LazyObjectAncestor
+    property is_a_LazyVecPartAncestor
+    
+    size := ST( 0 )
+    extr := ExtraData()
+
+    virtual def select( i )
+        abstract
+    
+    virtual def __for__( block )
+        abstract
+        
+    virtual def get_ScalarType
+        abstract
+    
+    virtual def data_size_in_memory
+        abstract
+    
+
+#~
+    Function (...) -> LazyVecPart[ T ] * should inherits from LazyVecPart[ T ]
+~#
+class LazyVecPart[ T, ST, ExtraData = Int32 ] inherits LazyVecPartAncestor[ ST, ExtraData ]
+    data := Ptr[ T ]( NULL )
+    
+    virtual def select( i )
+        return data[ i ]
+    
+    virtual def __for__( block )
+        ls := LazySimpleScheduler( [ &self ] ); ls.execute()
+        for i in 0 .. size
+            block( data[i] )
+    
+    virtual def get_ScalarType
+        return T
+    
+    virtual def allocate
+        assert( not data, "allocate several times" )
+        data = malloc( T.byte_size * size )
+    
+    virtual def free
+        if data
+            # print "final frite ", self
+            data.free()
+            data = NULL
+    
+    virtual def get_done
+        return Bool( data )
+    
+    virtual def data_size_in_memory
+        return T.byte_size * size
+    
+#~~#
+class LazyVecPartOperatorKnownVec[ T, ST, ExtraData ] inherits LazyVecPart[ T, ST, ExtraData ]
+    #
+    def init( vec )
+        init_lazy_obj()
+        data = allocate( T, vec.size )
+        size = vec.size
+        for v, i in vec, 0...
+            data[i] = v
+
+#~
+~#
+class LazyVecPartBaseCompiledFunction[ T, ST ]
+    def get_src( stream ) 
+        stream <<<< 
+            #include <iostream>
+            #include <cmath>
+        if T::is_a_number
+            stream <<<< 
+                template<class T> void make_range( T *res, T begin, T end, T incr ) {
+                    for( unsigned i = 0; begin < end ; begin += incr, ++i )
+                        res[i] = begin;
+                }
+            for tr, ts, tb in [ ("Add","+","0"), ("Mul","*","1") ]
+                stream <<<< 
+                    template<class T,class ST> void reduction_$tr( T &res, const T *vec, ST size ) {
+                        res = $tb;
+                        for( unsigned i = 0; i < size; ++i )
+                            res $ts= vec[i];
+                    }
+        stream <<<< 
+            template<class TR,class TV,class ST> void assign_cst_value( TR *res, const TV &value, ST size ) {
+                for(unsigned i=0;i<size;++i)
+                    res[i] = value;
+            }
+    #
+    def get_wanted_functions
+        res := SplittedVec[ CppFunctionDescription, 16 ]()
+        if T::is_a_number
+            res.push_back( "make_range", [ Ptr[ T ], T, T, T ] )
+            for op in ["Add","Mul"]
+                res.push_back( "reduction_$op", [ T, Ptr[T], ST ] )
+        res.push_back( "assign_cst_value", [ Ptr[ T ], T, ST ] )
+        return res
+    def get_control_sum
+        return 10
+
+#~
+~#
+class LazyVecPartBaseCompiledFunction[ T, T0, T1, ST ]
+    def get_src( stream ) 
+        stream <<<< 
+            #include <iostream>
+            #include <cmath>
+        #
+        for tr, ts, tb in [ ("Add","+",""), ("Mul","*",""), ("Sub","-",""), ("Div","/",""), ("Pow",",","pow") ]
+            stream <<<< 
+                template<class T,class T0,class T1,class ST> void vec_op_2_$tr( T *res, const T0 *v0, const T1 *v1, ST b0, ST b1, ST size ) {
+                    for(unsigned i=0;i<size;++i)
+                        res[i] = (T)$tb( v0[i+b0] $ts v1[i+b1] );
+                }
+    #
+    def get_wanted_functions
+        res := SplittedVec[ CppFunctionDescription, 16 ]()
+        for op in ["Add","Mul","Sub","Div","Pow"]
+            res.push_back( "vec_op_2_$op", [ Ptr[T], Ptr[T0], Ptr[T1], ST, ST, ST ] )
+        return res
+    
+    def get_control_sum
+        return 2
+    
+    
+# -------------------- RANGE --------------------
+
+
+#~
+~#
+class LazyVecPartOperatorRange[ T, ST ] inherits LazyVecPart[ T, ST ]
+    static func := CppCompiledFunctionSet[ LazyVecPartBaseCompiledFunction[ T, ST ] ]::get_func("make_range")
+    
+    beg := T()
+    end := T()
+    inc := T()
+    
+    def init( b, e, i )
+        init_lazy_obj()
+        beg = b; end = e; inc = i
+        size = ( end - beg ) // inc
+    
+    def init_would_give_the_same_result( b, e, i )
+        return beg == b and end == e and inc == i
+    
+    virtual def evaluate
+        # for i in 0 .. size  data[i] = beg + inc * i
+        exec_ccode_function( func, data, beg, end, inc )
+    
+    virtual def nb_rw_estimation
+        return size * T.byte_size
+    
+    virtual def write_to_stream( stream )
+        stream << "$beg..$end[$inc]"
+    
+# ------------------ UNARYOP, BINOP ------------------
+     
+#~
+~#
+class LazyVecPartBinaryOperator[ Oper, ST, T0, T1, T ] inherits LazyVecPart[ T, ST ]
+    static func := CppCompiledFunctionSet[ LazyVecPartBaseCompiledFunction[ T, T0, T1, ST ] ]::get_func("vec_op_2_$Oper")
+    property is_a_LazyVecPartBinaryOperator
+    
+    bs := Vec[ ST, 2 ]() # offsets
+    
+    def init( v0, v1, b0, b1, cs )
+        init_lazy_obj()
+        bs[0] = b0; bs[1] = b1
+        size  = cs
+        add_child( v0 )
+        add_child( v1 )
+    
+    virtual def evaluate
+        # info children[0]->done, children[1]->done
+        # info child_cast( children[0] )->data, child_cast( children[1] )->data, @children[0], @children[1], children[0], children[1]
+        # info true_type( @children[0] )
+        # info true_type( @children[1] )
+        # info children[0]
+        # info children[1]
+        # info child_cast( children[0] )->data[0]
+        # info child_cast( children[1] )->data[0]
+        exec_ccode_function( func, data, child_cast( children[0] )->data, child_cast( children[1] )->data, bs[0], bs[1], size )
+        # for i in 0 .. size
+            # data[i] = op( ch_0[i+b_0], ch_1[i+b_1] )
+    
+    virtual def write_to_stream( stream )
+        stream << Oper << "(V)"
+        # stream << "$Oper( $(ch[0].ptr), $(ch[1].ptr) ) -> $(&self)"
+    
+    virtual def simplify
+        info self.type
+    
+    virtual def nb_rw_estimation
+        res := data_size_in_memory()
+        res += child_cast( children[0] )->data_size_in_memory()
+        res += child_cast( children[1] )->data_size_in_memory()
+        return res
+    
+    virtual def nb_flop_estimation
+        return size # hum (Float32, 96, ... ?)
+    
+    
+# look for similar Nodes
+def new_LazyVecPartBinaryOperator( ST, sub_vec_0, sub_vec_1, b0, b1, cs, op )
+    if op.commutative_op and sub_vec_0.ptr > sub_vec_1.ptr
+        return new_LazyVecPartBinaryOperator( ST, sub_vec_1, sub_vec_0, b1, b0, cs, op )
+    # look in parents of sub_vec_0 for similar op
+    T0 := sub_vec_0->get_ScalarType()
+    T1 := sub_vec_1->get_ScalarType()
+    T  := op.ReturnType( T0, T1 )
+    
+    BT := LazyVecPartBinaryOperator[ op, ST, T0, T1, T ]
+    # BT_ := LazyVecPartBinaryOperator[ op, ST, T0, T1, T ]
+    # BT  := type_of( partial_instanciation BT_ ) # hum
+    # for p in sub_vec_0->parents
+        # TT := true_type( @p )
+        # if TT == BT
+            # t := Ptr[ TT ]( UntypedPtr( p ) )
+            # if op == t->Oper and UntypedPtr(sub_vec_0) == UntypedPtr(t->children[0]) and UntypedPtr(sub_vec_1) == UntypedPtr(t->children[1]) and b0 == t->bs[0] and b1 == t->bs[1] and cs == t->size
+                # return t
+    # not found -> create a new one
+    return new BT( sub_vec_0, sub_vec_1, b0, b1, cs )
+
+#
+def lvec_binary_op( a, b, op )
+    # R := op.ReturnType( a.T, b.T )
+    res := LazyVec()
+    #
+    ST := type_promote( partial_instanciation a.ST, partial_instanciation b.ST, add )
+    for i0, i1, b0, b1, cs in BiLazyVecItemExplorer_( a.sub_vecs.size, a.size_sub_vec, b.sub_vecs.size, b.size_sub_vec )
+        res.sub_vecs_push_back(
+            new_LazyVecPartBinaryOperator( ST, a.sub_vecs[ i0 ], b.sub_vecs[ i1 ], b0, b1, cs, op )
+        )
+    return res
+
+def add( a, b ) when a.is_a_LazyVec and b.is_a_LazyVec pertinence 10 return lvec_binary_op( a, b, Add() )
+def sub( a, b ) when a.is_a_LazyVec and b.is_a_LazyVec pertinence 10 return lvec_binary_op( a, b, Sub() )
+def mul( a, b ) when a.is_a_LazyVec and b.is_a_LazyVec pertinence 10 return lvec_binary_op( a, b, Mul() )
+def div( a, b ) when a.is_a_LazyVec and b.is_a_LazyVec pertinence 10 return lvec_binary_op( a, b, Div() )
+def pow( a, b ) when a.is_a_LazyVec and b.is_a_LazyVec pertinence 10 return lvec_binary_op( a, b, Pow() )
+
+
+#~
+~#
+class BiLazyVecItemExplorer_
+    s1 := 0
+    s2 := 0
+    f1 := InternalVariable()
+    f2 := InternalVariable()
+
+    def init( si1, function_1, si2, function_2 )
+        s1 = si1
+        s2 = si2
+        f1.init_using_var( function_1 )
+        f2.init_using_var( function_2 )
+
+    def __for__( block ) # num_block_1, num_block_2, offset_1, offset_2, common_size
+        i1 := 0; i2 := 0; b1 := 0; b2 := 0
+        while i1 < s1 and i2 < s2
+            #cs1 := li1->sub_vecs[i1]->size - b1
+            #cs2 := li2->sub_vecs[i2]->size - b2
+            cs1 := (@f1)( i1 ) - b1
+            cs2 := (@f2)( i2 ) - b2
+            if cs1 == cs2
+                block( ( i1, i2, b1, b2, cs1 ) )
+                b1 = 0
+                b2 = 0
+                i1++
+                i2++
+            else if cs1 > cs2
+                block( ( i1, i2, b1, b2, cs2 ) )
+                b1 += cs2
+                b2 = 0
+                i2++
+            else
+                block( ( i1, i2, b1, b2, cs1 ) )
+                b1 = 0
+                b2 += cs1
+                i1++
+
+
+# ------------------ FROM FILE ------------------
+
+#~
+    sub_vecs_push_back(
+        new_lazy_leave( LazyVecPartOperatorReadFromFile[ T, ST ], beg, size, filename )
+    )
+~#
+class LazyVecPartOperatorReadFromFile[ T, FT, ST ] inherits LazyVecPart[ T, ST ]
+    assert( T == FT, "TODO : read binary $T from $FT data" )
+
+    beg_seek := ST( 0 ) # offset in bytes
+    filename := ""   # ...
+    
+    def init( b, s, f ) # b -> offset in bytes
+        init_lazy_obj()
+        beg_seek = b; size = s; filename = f
+    
+    def init_would_give_the_same_result( b, s, f )
+        return beg_seek == b and size == s and filename == f
+    
+    virtual def evaluate
+        f := File( filename, "r" )
+        f.seek( beg_seek )
+        f.read( p = data, nb_bytes = size * T.byte_size )
+    
+    virtual def write_to_stream( stream )
+        stream << "VF" # ecFromFile[$filename,$beg_seek,$size]
+
+#~
+~#
+class LazyVecPartWriter inherits LazyObjectAncestor
+    filename := ""
+    mode     := "" # w, a, ...
+    done_    := false
+    
+    def init( f, m, s )
+        init_lazy_obj()
+        filename = f
+        mode     = m
+        add_child( s )
+    
+    
+    virtual def get_done
+        return done_
+    
+    virtual def evaluate
+        f := File( filename, mode )
+        ch := child_cast( children[0] )
+        f.write( UntypedPtr( ch->data ), ch->size * ch->T.byte_size )
+        done_ = true
+    
+    virtual def write_to_stream( s )
+        s << "StreamWriter($mode)"
+
+
+# ------------------ CONCAT ------------------
+#~
+~#
+class LazyVecPartOperatorCstValue[ T, ST ] inherits LazyVecPart[ T, ST ]
+    static func := UntypedPtr( NULL )
+    static const LST := [ Float32 Float64 Float96 Int32 Int64 ]
+    if ( T in LST ) or ( T::is_a_vec_of_static_size and ( T::T in LST ) )
+        func = CppCompiledFunctionSet[ LazyVecPartBaseCompiledFunction[ T, ST ] ]::get_func("assign_cst_value")
+    val := T()
+    
+    def init( s, v )
+        init_lazy_obj()
+        size = s
+        val = v
+        
+    def init_would_give_the_same_result( s )
+        return size == s
+    
+    virtual def nb_rw_estimation
+        return data_size_in_memory()
+
+    virtual def evaluate
+        if func
+            exec_ccode_function( func, data, val, size )
+        else
+            for i in 0 .. size
+                data[ i ].init( val )
+    
+    virtual def write_to_stream( stream )
+        stream << "VC" # [$val,$size]
+
+#~
+~#
+class LazyVecPartOperatorCstValueFromLazyScalar[ T, ST ] inherits LazyVecPart[ T, ST ]
+    static func := UntypedPtr( NULL )
+    static const LST := [ Float32 Float64 Float96 Int32 Int64 ]
+    if ( T in LST ) or ( T::is_a_vec_of_static_size and ( T::T in LST ) )
+        func = CppCompiledFunctionSet[ LazyVecPartBaseCompiledFunction[ T, ST ] ]::get_func("assign_cst_value")
+    
+    def init( s, v )
+        init_lazy_obj()
+        size = s
+        add_child( v.data )
+        
+    # def init_would_give_the_same_result( s, v )
+        # return size == s and 
+    
+    virtual def nb_rw_estimation
+        return data_size_in_memory()
+
+    virtual def evaluate
+        v := T( child_cast( children[0] )->value )
+        if func
+            exec_ccode_function( func, data, v, size )
+        else
+            for i in 0 .. size
+                data[ i ].init( v )
+    
+    virtual def write_to_stream( stream )
+        stream << "VecCst[$size]"
+
+# ------------------ CONCAT ------------------
+
+def concatenate( u, v ) when u.is_a_LazyVec and v.is_a_LazyVec
+    res := LazyVec()
+    res.sub_vecs = u.sub_vecs +++ v.sub_vecs
+    return res
+
+# ------------------- REDUCTION ----------------------
+#~
+~#
+class LazyVecPartOperatorReduction[ T_, Oper, ST ] inherits LazyScalarFunction[ T_, calculable_ = true ]
+    static func := CppCompiledFunctionSet[ LazyVecPartBaseCompiledFunction[ T_, ST ] ]::get_func("reduction_$Oper")
+    
+    size := ST( 0 )
+    
+    def init( sub_vec )
+        init_lazy_obj()
+        size = sub_vec->size
+        add_child( sub_vec )
+
+    virtual def evaluate
+        exec_ccode_function( func, value, child_cast( children[0] )->data, size )
+        done_ = true
+        # for i in 0 .. size  data[ i ].init( val )
+    
+    virtual def write_to_stream( stream )
+        stream << "Reduction($Oper)"
+    
+    virtual def nb_rw_estimation
+        return size * T.byte_size
+
+    virtual def nb_flop_estimation
+        return size # hum
+
+
+#
+def sum_sub_vecs_rec_( sub_vecs )
+    s := sub_vecs.size
+    if s == 1
+        sv := sub_vecs[0]
+        return LazyScalar( data = new LazyVecPartOperatorReduction[ sv->get_ScalarType(), Add(), sv->ST ]( sv ) )
+    return sum_sub_vecs_rec( v.sub_vecs[ 0 .. s / 2 ] ) + sum_sub_vecs_rec( v.sub_vecs[ s / 2 .. s ] )
+
+#
+def sum( v, default_value = 0 ) when v.is_a_LazyVec
+    if v.sub_vecs.size
+        return sum_sub_vecs_rec_( v.sub_vecs )
+    return LazyScalar( default_value )
+    
+    
+# -------------------- FLATTER -------------------- 
+class LazyVecPartOperatorFlatter[ T, static_size, ST, ExtraData = Int32 ] inherits LazyVecPart[ T, ST, ExtraData ]
+    def init( sub_vec )
+        init_lazy_obj()
+        size = sub_vec->size * static_size
+        add_child( sub_vec )
+
+    virtual def evaluate
+        ch := child_cast( children[0] )
+        for i in 0 .. size // static_size
+            for s in 0 .. static_size
+                data[ static_size*i + s ].init( ch->select(i)[s] )
+    
+    virtual def write_to_stream( stream )
+        stream << "Flatter"
+    
+    virtual def nb_rw_estimation
+        return 2 * data_size_in_memory()
+
+
+def flatter( v ) when v.is_a_LazyVec
+    res := LazyVec()
+    for sub_vec in v.sub_vecs
+        TV := sub_vec->get_ScalarType()
+        res.sub_vecs_push_back( new LazyVecPartOperatorFlatter[ TV::T, TV::static_size, v.ST ]( sub_vec ) )
+    return res
+    
+# --------------------- SUB_PART ----------------------
+class LazyVecOperatorSubPart[ T, ST, ExtraData = Int32 ] inherits LazyVecPart[ T, ST, ExtraData ]
+    beg ~= ST
+    end ~= ST
+    inc ~= ST
+    
+    def init( s, b, e, i = 1 )
+        init_lazy_obj()
+        size = e - b
+        beg = b
+        end = e
+        inc = i
+        add_child( s )
+    
+    virtual def evaluate
+        ch := child_cast( children[0] )
+        for i in 0 .. size
+            data[ i ].init( beg + ch->select(i) )
+    
+    virtual def write_to_stream( stream )
+        stream << "SubPart[$beg..$end]"
+    
+    virtual def nb_rw_estimation
+        return 2 * data_size_in_memory()
+    
+# -------------------- LazyVecOperatorConcat -------------------------
+class LazyVecOperatorConcat[ T, ST, ExtraData ] inherits LazyVecPart[ T, ST, ExtraData ]
+    def init( ch_0, ch_1 )
+        init_lazy_obj()
+        add_child( ch_0 )
+        add_child( ch_1 )
+        size = ch_0->size + ch_1->size
+    
+    virtual def evaluate
+        ch_0 := child_cast( children[0] )
+        ch_1 := child_cast( children[1] )
+        cpt := 0
+        for i in 0 .. ch_0->size
+            data[ cpt++ ].init( ch_0->select( i ) )
+        for i in 0 .. ch_1->size
+            data[ cpt++ ].init( ch_1->select( i ) )
+    
+    virtual def write_to_stream( stream )
+        stream << "Concat"
+    
+    virtual def nb_rw_estimation
+        return 2 * data_size_in_memory()
+

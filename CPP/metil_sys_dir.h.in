@@ -1,0 +1,6 @@
+#ifndef METIL_SYS_DIR_H
+#define METIL_SYS_DIR_H
+
+#define MET_INSTALL_DIR "${CMAKE_METIL_INSTALL_PREFIX}"
+
+#endif // METIL_SYS_DIR_H

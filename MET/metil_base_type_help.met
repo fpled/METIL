@@ -1,0 +1,459 @@
+# -----------------------------------------------------------------------------------------------------------------------------------------
+
+## ##
+class StaticValIf[ want_static, static_value, T, want_const=false ] when want_static and want_const
+    static const val := T( static_value )
+    def pointed_value               return val
+    def init_value( v )             assert( v == val, "re-initialisation of a static val with different value (before -> $val, after -> $v)" )
+    def reassign_value( v )         assert( v == val, "re-initialisation of a static val with different value (before -> $val, after -> $v)" )
+    # def reassign( v )               assert( v == val, "re-initialisation of a static val with different value (before -> $val, after -> $v)" )
+    
+## ##
+class StaticValIf[ want_static, static_value, T, want_const=false ] when want_static
+    static val := T( static_value )
+    def pointed_value               return val
+    def init_value( v )             val = v
+    def reassign_value( v )         val = v
+    # def reassign( v )               assert( v == val, "re-initialisation of a static val with different value (before -> $val, after -> $v)" )
+
+## ##
+class StaticValIf[ want_static, static_value, T, want_const=false ] when not want_static
+    val := T()
+    def pointed_value               return val
+    def init_value( v )             val.init( v )
+    def reassign_value( v )         val.reassign( v )
+    # def reassign( v )               assert( v == val, "re-initialisation of a static val with different value (before -> $val, after -> $v)" )
+
+# -----------------------------------------------------------------------------------------------------------------------------------------
+#~
+~#
+class AutoPtr[ T ]
+    property is_a_AutoPtr
+    
+    p ~= Ptr[ T ]
+    
+    def init
+        p = NULL
+        
+    def init( v )
+        p = v
+        
+    def init( b ) when b.is_a_AutoPtr
+        if b.p
+            T2 := true_type(@b.p)
+            p.init( new T2( @reinterpret_cast( Ptr[T2], b.p ) ) )
+        else
+            p.init( NULL )
+
+    def pointed_value
+        return @p
+        
+    def destroy
+        delete p
+
+    def conversion_to( b ) when is_of_type_Bool( b )
+        b.init( Bool( p.ptr ) )
+    
+    def conversion_to( b ) when is_of_type_UntypedPtr( b )
+        b.init( p.ptr )
+    
+    def write_to_stream( stream )
+        stream << p
+
+#~ ~#
+def auto_ptr( p )
+    return AutoPtr[ p.T ]( p )
+
+
+#~
+~#
+class AutoUntypedPtr
+    property is_a_AutoPtr, is_Untyped
+    
+    p ~= UntypedPtr
+    
+    def init
+        p = NULL
+        
+    def init( v )
+        p = v
+        
+    def destroy
+        p.free()
+    
+    def conversion_to( b )
+        b.init( p )
+
+#~ ~#
+def auto_ptr( p ) when p.type == UntypedPtr
+    return AutoUntypedPtr( p )
+
+
+# -----------------------------------------------------------------------------------------------------------------------------------------
+#~
+stores an untyped pointer on data and an untyped pointer on type on a typed object
+
+a := 10
+p :=  UntypedPtrAndType( &a )
+info @p
+info size_of( p ) // 8 -> 8 ( on a 32 bit machine )
+
+~#
+class UntypedPtrAndType
+    property is_a_UntypedPtrAndType
+    ptr := UntypedPtr()
+    typ := UntypedPtr()
+    
+    def init( a ) when a.is_a_pointer and not a.is_a_UntypedPtrAndType pertinence 2
+        if a
+            ptr.init( UntypedPtr( a ) )
+            typ.init( untyped_ptr_on_type_of( @a ) )
+        else if a.is_a_Ptr
+            ptr.init( 0 )
+            typ.init( untyped_ptr_on_type_of( partial_instanciation a.T ) )
+        else
+            ptr.init( 0 )
+            typ.init( 0 )
+
+    def get_T
+        return ptr_on_type_to_def( typ )
+
+    def pointed_value
+        return @Ptr[ get_T() ]( ptr )
+
+    def conversion_to( b ) when b.type == Bool
+        b.init( ptr and typ )
+
+# -----------------------------------------------------------------------------------------------------------------------------------------
+
+## ##
+class RefIf[ T, want_ref] when want_ref
+    val ~= Ptr[T]
+    def pointed_value
+        return @val
+    def init( v ) when v.type == T
+        val.init( pointer_on(v) )
+    def reassign_value( v ) when v.type == T
+        val.reassign( pointer_on(v) )
+        
+## specialization ##
+class RefIf[ T, want_ref] when not want_ref
+    val := T()
+    def pointed_value
+        return val
+    def init( toto ) when toto.type == T
+        val.init()
+    def reassign_value( v ) when v.type == T
+        val.reassign( v )
+
+
+def reassign_using_var( self, function ) when is_of_type_InternalVariable( self )
+    self.destroy()
+    self.init_using_var( function )
+    
+# -----------------------------------------------------------------------------------------------------------------------------------------
+
+##
+Ex:
+    a := 10
+    p := MultiPtr()
+    p = pointer_on( a )
+    info @p
+##
+class MultiPtr
+    property is_a_MultiPtr, is_a_pointer
+    val := InternalVariable()
+    
+    def pointed_value
+        return @val
+        
+    def conversion_to( r ) when is_of_type_UntypedPtr(r)
+        r.init( get_value_prop get_ptr() )
+        
+    def conversion_to( r ) when r.is_a_Ptr
+        r.init( get_ptr() )
+        
+    def init( v ) when not v.is_a_MultiPtr
+        val.init_using_var( @v )
+        
+    def init( v ) when v.type == Null pertinence 10
+        val.init()
+        
+    def reassign( v ) when not v.is_a_MultiPtr
+        val.destroy()
+        val.init_using_var( @v )
+    
+    def reassign( v ) when v.is_Null pertinence 10
+        val.init()
+        
+    def free
+        (&(@val)).free()
+        
+    def conversion_to( b ) when b.type == Bool
+        b.init( val )
+        
+    def get_T
+        return val->type
+        
+    def get_ptr
+        if not val
+            return UntypedPtr(0)
+        return &(@val) #.ptr
+        
+    def copy
+        if not val
+            return MultiPtr()
+        return new val->type( @val )
+   
+    def write_to_stream( stream )
+        stream << get_ptr()
+        
+def equal( a, b ) when a.is_a_Ptr and b.is_a_MultiPtr
+    return a.ptr == b.ptr
+def equal( a, b ) when a.is_a_MultiPtr and b.is_a_Ptr
+    return a.ptr == b.ptr
+
+#~
+Ex:
+~#
+class UnionPtr[ lst_defs ]
+    property is_a_UnionPtr, is_a_pointer
+    #~
+        t := Int32() <- num of type
+        d := lst_defs[t]()
+    ~#
+    p := UntypedPtr( NULL )
+    
+    def pointed_value
+        return @get_ptr()
+    
+    def conversion_to( r ) when is_of_type_UntypedPtr(r)
+        r.init( get_value_prop get_ptr().ptr )
+    
+    def conversion_to( r ) when r.is_a_Ptr
+        r.init( get_ptr() )
+    
+    def new_t( n, varargs ) when n.is_a_number
+        p = allocate( 32 + size_of( partial_instanciation lst_defs[n] ), 1 )
+        @Ptr[Int32]( p ) = n
+        call( Ptr[lst_defs[n]]( p + 4 )->init, varargs )
+        return Ptr[lst_defs[n]]( p + 4 )
+    
+    def new_t( d, varargs ) when not d.is_a_number
+        n := lst_defs.index_of_first_item_equal_to( d, -1 )
+        assert( n >= 0, "$d not present in [$lst_defs]" )
+        p = allocate( 32 + size_of( partial_instanciation lst_defs[n] ), 1 )
+        @Ptr[Int32]( p ) = n
+        call( Ptr[lst_defs[n]]( p + 4 )->init, varargs )
+        return Ptr[lst_defs[n]]( p + 4 )
+        
+    def free
+        get_ptr()->destroy()
+        p.free()
+        
+    def conversion_to( b ) when b.type == Bool
+        b.init( p )
+        
+    def get_T
+        t := @Ptr[Int32]( p )
+        return lst_defs[t]
+    
+    def get_num_type
+        return @Ptr[Int32]( p )
+        
+    def get_ptr
+        t := @Ptr[Int32]( p )
+        return Ptr[ lst_defs[t] ]( p + 4 )
+    
+    def copy
+        if not p
+            return UnionPtr[ lst_defs ]()
+        res := UnionPtr[ lst_defs ]()
+        res.new_t( @Ptr[Int32]( p ), @self )
+        return res
+        
+    static def test_
+        p := UnionPtr[ [Int32,String] ]()
+        p.new_t( Int32, 21 )
+        info @p
+        p.free()
+        p.new_t( 1, "String protue" )
+        info @p
+
+#~
+~#
+class PtrWithCptUse[ T ]
+    property is_a_PtrWithCptUse, is_a_pointer
+
+    ptr := Ptr[T]( NULL )
+    
+    def pointed_value
+        return @ptr
+    
+    def conversion_to( r ) when is_of_type_UntypedPtr(r)
+        r.init( ptr.ptr )
+        
+    def conversion_to( r ) when r.is_a_Ptr
+        r.init( ptr )
+    
+    def conversion_to( r ) when r.type == Bool
+        r.init( ptr )
+    
+    def init( p ) when p.is_Null
+        ptr.init( NULL )
+    
+    def init( p ) when p.is_a_Ptr
+        ptr.init( p )
+        if ptr
+            ptr->cpt_use++
+    
+    def init( p ) when p.is_a_PtrWithCptUse
+        ptr.init( p.ptr )
+        if ptr
+            ptr->cpt_use++
+        
+    def reassign( p ) when p.is_a_Ptr
+        old_ptr := ptr
+        ptr = p
+        if ptr
+            ptr->cpt_use++
+        if old_ptr
+            if old_ptr->cpt_use > 1
+                old_ptr->cpt_use--
+            else
+                delete old_ptr
+        
+    def reassign( p ) when p.is_a_PtrWithCptUse
+        old_ptr := ptr
+        ptr = p.ptr
+        if ptr
+            ptr->cpt_use++
+        if old_ptr
+            if old_ptr->cpt_use > 1
+                old_ptr->cpt_use--
+            else
+                delete old_ptr
+    
+    def destroy
+        if ptr
+            if ptr->cpt_use > 1
+                ptr->cpt_use--
+            else
+                delete ptr
+    
+    def write_to_stream( stream )
+        stream << ptr
+    
+    def test_
+        class P
+            cpt_use := 0
+            def init
+                cpt_use = 0
+                print "init $(&self)"
+            def destroy
+                print "destroy $(&self)"
+        p := PtrWithCptUse[ P ]( new P )
+        p = p
+    
+#
+def equal( a, b ) when a.is_a_PtrWithCptUse and b.is_a_PtrWithCptUse
+    return a.ptr.ptr == b.ptr.ptr
+    
+    
+#~
+~#
+class MultiPtrWithCptUse
+    property is_a_MultiPtrWithCptUse, is_a_pointer
+
+    ptr := MultiPtr( NULL )
+    
+    def pointed_value
+        return @ptr
+    
+    def conversion_to( r ) when is_of_type_UntypedPtr(r)
+        ptr.conversion_to( r )
+        
+    def conversion_to( r ) when r.is_a_Ptr
+        ptr.conversion_to( r )
+    
+    def conversion_to( b ) when b.type == Bool
+        b.init( Bool( ptr ) )
+    
+    def init( p ) when p.is_a_Ptr
+        ptr.init( p )
+        if ptr
+            ptr->cpt_use++
+    
+    def init( p ) when p.is_a_PtrWithCptUse or p.is_a_MultiPtrWithCptUse or p.is_a_MultiPtr
+        ptr.init( p.ptr )
+        if ptr
+            ptr->cpt_use++
+            
+    def init( p ) when p.is_Null
+        p.init( NULL )
+        
+    def reassign( p ) when p.is_a_Ptr
+        old_ptr := ptr
+        ptr = p
+        if ptr
+            ptr->cpt_use++
+        if old_ptr
+            if old_ptr->cpt_use > 1
+                old_ptr->cpt_use--
+            else
+                delete old_ptr
+        
+    def reassign( p ) when p.is_a_PtrWithCptUse or p.is_a_MultiPtrWithCptUse or p.is_a_MultiPtr
+        old_ptr := ptr
+        ptr = p.ptr
+        if ptr
+            ptr->cpt_use++
+        if old_ptr
+            if old_ptr->cpt_use > 1
+                old_ptr->cpt_use--
+            else
+                delete old_ptr
+    
+    def destroy
+        if ptr
+            if ptr->cpt_use > 1
+                ptr->cpt_use--
+            else
+                delete ptr
+    
+    def test_
+        class P
+            cpt_use := 0
+            def init
+                cpt_use = 0
+                print "init $(&self)"
+            def destroy
+                print "destroy $(&self)"
+        p := MultiPtrWithCptUse( new P )
+        p = p
+    
+    
+#~
+~#
+def child_cast( p )
+    if p
+        return Ptr[ true_type( @p ) ]( UntypedPtr( p ) )
+    return p
+
+# ---------------------------------------------------------
+class AutoRetore[ T ]
+    p ~= Ptr[ T ]
+    old_val ~= T
+    
+    def init( v, n )
+        old_val.init( v )
+        p.init( &v )
+        v = n
+    
+    def destroy
+        @p = old_val
+        old_val.destroy()
+        
+def auto_restore( val, new_val )
+    return AutoRetore[ type_of( val ) ]( val, new_val )
+

@@ -1,0 +1,6 @@
+#ifndef METIL_MPI_CONFIG_H
+#define METIL_MPI_CONFIG_H
+
+#cmakedefine MPI_INCLUDE_PATH @MPI_INCLUDE_PATH@
+
+#endif // METIL_MPI_CONFIG_H

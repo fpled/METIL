@@ -1,0 +1,6 @@
+#ifndef METIL_DL_CONFIG_H
+#define METIL_DL_CONFIG_H
+
+#cmakedefine HAVE_LIBDL @HAVE_LIBDL@
+
+#endif // METIL_DL_CONFIG_H

@@ -1,0 +1,177 @@
+##
+    Simple map made by 2 vectors
+##
+class Map[ K, V, default_value = V() ]
+    property is_a_Map
+
+    keys   := SplittedVec[K,32]()
+    values := SplittedVec[V,32]()
+
+    def select( key ) when type_of( key ) == K
+        for i in 0 .. keys.size
+            if assumed( key == keys[i] )
+                return values[i]
+        # creation of a new pair
+        keys.push_back( key )
+        return @values.push_back( default_value )
+
+    def select( varargs )
+        t := partial_instanciation K
+        call( t.init, varargs )
+        return select( t )
+
+    def contains( key )
+        for cpt in 0 .. keys.size
+            if keys[cpt] == key
+                return true
+        return false
+
+    def remove( key )
+        for cpt in 0 .. keys.size
+            if keys[cpt] == key
+                keys  .remove_unordered( cpt )
+                values.remove_unordered( cpt )
+                break
+
+    def get_size
+        return keys.size
+
+    def __for__( block )
+        for k, v in keys, values
+            block( make_varargs( k, v ) )
+
+
+    def write_to_stream( stream )
+        for i in 0 .. keys.size
+            stream << keys[i] << " => " <<< values[i]
+
+def __in__( key, map_ ) when map_.is_a_Map
+    for k in map_.keys
+        if assumed( key == k )
+            return true
+    return false
+
+#~
+~#
+class MapDef[ V ]
+    keys   := VarArgs()
+    values := Vec[ V ]()
+
+    def select( key )
+        for k, cpt in keys, 0...
+            if k == key
+                return values[ cpt ]
+        keys.push_unnamed( key )
+        return @values.push_back()
+
+    def __for__( block )
+        for k, v in keys, values
+            block( ( k, v ) )
+
+
+##
+    Simple set made by 1 vector
+##
+class Set[ K, eq = equal ]
+    property is_a_Set
+
+    keys := Vec[ K ]()
+
+    def init( values ) when values.tensor_order == 1
+        keys.init()
+        for k in values
+            insert( k )
+
+    def insert( key ) pertinence 2
+        for i in keys
+            if assumed( eq( key, i ) )
+                return i
+        # creation of a new key
+        return keys.push_back( key )
+
+    def insert( varargs ) #
+        n := call_with_return( K, varargs )
+        return insert( n )
+
+    def remove( key )
+        for i in 0 .. keys.size
+            if assumed( eq( key, keys[i] ) )
+                keys.remove_unordered( i )
+                break
+
+    def get_size
+        return keys.size
+
+    def conversion_to( b ) when b.type == Bool
+        b.init( keys.size )
+
+    def select( i )
+        return keys[ i ]
+
+    def __for__( block )
+        for i in keys
+            block( i )
+
+def __in__( key, set_ ) when set_.is_a_Set
+    for k in set_.keys
+        if assumed( set_.eq( key, k ) )
+            return true
+    return false
+
+
+##
+##
+class Pair[ T0, T1 ]
+    first := T0()
+    second := T1()
+    def equal( m )
+        return first == m.first and second == m.second
+    def init( a, b )
+        first.init( a )
+        second.init( b )
+    def init( a ) when a.tensor_order == 1
+        first.init( a[0] )
+        second.init( a[1] )
+    def reassign( a ) when a.tensor_order == 1
+        first = a[0]
+        second = a[1]
+    def select( i )
+        if i return second
+        return first
+    def __for__( block )
+        block( first )
+        block( second )
+
+##
+##
+class Quadrinom[ T0, T1, T2, T3 ]
+    first  := T0()
+    second := T1()
+    third  := T2()
+    fourth := T3()
+    def init( a, b, c, d )
+        first .init( a )
+        second.init( b )
+        third .init( c )
+        fourth.init( d )
+    def init( a ) when a.tensor_order == 1
+        first .init( a[0] )
+        second.init( a[1] )
+        third .init( a[2] )
+        fourth.init( a[3] )
+    def reassign( a ) when a.tensor_order == 1
+        first  = a[0]
+        second = a[1]
+        third  = a[2]
+        fourth = a[3]
+    def select( i )
+        if i == 3 return fourth
+        if i == 2 return third
+        if i return second
+        return first
+    def __for__( block )
+        block( first  )
+        block( second )
+        block( third  )
+        block( fourth )
+

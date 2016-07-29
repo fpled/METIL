@@ -1,0 +1,128 @@
+#~
+== Orthogonalizer ==
+* properties
+** stores a list of "vectors"
+** is able to orthogonalize(normalize) new data with respect to its stack
+~#
+
+
+#~
+=== GramSchmidt methods ===
+see [??]
+~#
+
+class GramSchmidt[ T, normalized, euclidian, TVECLIST = MatVecList[T,ST]  ]
+    property is_a_gramschmidt
+    static const TypeNormList := [Vec[T],VecCst[value=T(1)]]
+    
+    vec_list := TVECLIST()
+    a_vec_list := RefIf[ TVECLIST, euclidian ]()
+    norm_list := TypeNormList[normalized]()
+    ortho_keep_ := 1024
+    older_vec_index := 0
+    
+    #
+    def write_to_stream(f)
+        f <<< join(vec_list,"\n")
+    #
+    def mul( v ) when v.tensor_order==1
+        ret := LazyVec( vec_list[0] * v[0] )
+        for i in 1 .. v.size
+            ret += vec_list[i] * v[i]
+        return ret
+    #
+    def init
+        init_using_default_values( self )
+        a_vec_list.init(vec_list)
+    #
+    def init( val )
+        init_using_default_values( self )
+        a_vec_list.init( vec_list )
+    #
+    def add_vec(vec)
+        if vec_list.nb_cols == ortho_keep
+            vec_list[ older_vec_index++ ] = vec
+            older_vec_index %= ortho_keep_
+        else
+            vec_list.push_back( vec )
+    #
+    def add_vec(vec, n_vec)
+        if vec_list.nb_cols == ortho_keep
+            vec_list[ older_vec_index++ ] = vec
+            older_vec_index %= ortho_keep_
+        else
+            vec_list.push_back( vec )
+    #
+    def add_vec( vec, a_vec , n_vec)
+        if normalized
+            toto := 1/sqrt(n_vec)
+            vec *= toto
+            a_vec *= toto
+            if vec_list.nb_cols == ortho_keep_
+                vec_list[ older_vec_index ] = vec
+                (@a_vec_list)[ older_vec_index++ ] = a_vec
+                older_vec_index %= ortho_keep_
+            else
+                vec_list.push_back( vec )
+                (@a_vec_list).push_back( a_vec )
+        else
+            if vec_list.nb_cols == ortho_keep_
+                vec_list[ older_vec_index ] = vec
+                (@a_vec_list)[ older_vec_index ] = a_vec
+                norm_list[ older_vec_index++ ] = n_vec
+                older_vec_index %= ortho_keep_
+            else
+                vec_list.push_back( vec )
+                (@a_vec_list).push_back( a_vec )
+                norm_list.push_back( n_vec )
+    #
+    def get_ortho_keep
+        return ortho_keep_
+    #
+    def reassign_ortho_keep( val )
+        ortho_keep_ = val
+        assert( ortho_keep_ >= vec_list.nb_cols, "TODO -> change ortho_keep" )
+#
+def mul(a,b) when ( a.is_a_gramschmidt ) and b.tensor_order==1
+    return(a.mul(b))
+
+
+#~
+==== Classical GramSchmidt ====
+* Fastest but least robust
+@optimize real use of matrix operations
+~#
+
+
+class ClassicalGramSchmidt[ T, normalized, euclidian, TVECLIST = MatVecList[T] ] inherits GramSchmidt[ T, normalized, euclidian, TVECLIST ]
+    def orthogonalize( vec )
+        tmp := Vec[T]()
+        orthogonalize( vec, tmp )
+    #
+    def orthogonalize( vec, tmp )
+        tmp.size = vec_list.nb_cols
+        for i in 0 .. vec_list.nb_cols
+            tmp[i] = dot( (@a_vec_list)[i], vec ) / norm_list[i]
+        for i in 0 .. vec_list.nb_cols
+            vec -= tmp[i] * vec_list[i]
+
+#~
+==== Modified GramSchmidt ====
+*Less fast but more robust
+~#
+
+class ModifiedGramSchmidt[ T, normalized, euclidian, TVECLIST = MatVecList[T] ] inherits GramSchmidt[ T, normalized, euclidian, TVECLIST ]
+    def orthogonalize( vec )
+        vt := Vec[T]()
+        orthogonalize( vec, vt )
+    #
+    def orthogonalize( vec , vt )
+        vt.size = vec_list.nb_cols
+        for i in 0..vec_list.nb_cols
+            vt[i] = dot( (@a_vec_list)[i] , vec ) / norm_list[i]
+            vec -= vt[i] * vec_list[i]
+
+#~
+@todo IterativeGramSchmidt (very robust)
+@todo HouseHolder orthogonalization (also very robust)
+~#

@@ -1,0 +1,151 @@
+#~  ~#
+class GenericPlotDevice[ dim ]
+    static const P := Vec[Float64,dim]
+    points   := Vec[P]()
+    lines    := Vec[Vec[P,2]]()
+    triangle := Vec[Vec[P,3]]()
+    labels   := Vec[ Pair[P,String] ]()
+    
+    def add_line( P0, P1 )
+        lines.push_back( [ P0, P1 ] )
+    
+    def add_point( P0 )
+        points.push_back( P0 )
+    
+    def add_label( P, L )
+        labels.push_back( first = P, second = L )
+        
+
+#~  ~#
+class PyLabPlot
+    f ~= File
+    destroy_pipe := true
+    cpt_plt := 0
+    def init
+        init_using_default_values( self )
+        f.init( executable = "python", mode = "w" )
+        f <<< "from pylab import *"
+        destroy_pipe = true
+    def destroy
+        if destroy_pipe
+            f.destroy()
+    def g_plot( t_plot, x, y = [], line_style = "-", title = "" )
+        if x.size and y.tensor_order == 1 and y.size==0
+            return g_plot( t_plot, range( x.size ), x, line_style, title )
+        #
+        f << "plt_$cpt_plt = $t_plot("
+        
+        s := 0
+        if x.tensor_order == 1
+            s = x.size
+        if y.tensor_order == 1
+            s = min( x.size, y.size )
+        
+        # x
+        f << "[" << join( x[0..s].map( w => Float64( w ).to_string(16) ), "," ) << "]"
+        
+        # y
+        if y.tensor_order == 1
+            f << ", [" << join( y[0..s].map( w => Float64( w ).to_string(16) ), "," ) << "] "
+        else
+            f << ", ["
+            for w in x[0..s]
+                f << Float64( y( w ) ).to_string(16) << ","
+            f << "]"
+        
+        # for v, cpt in lst, 0...
+            # if v.type == String
+                # f << "'" << v << "'" << ","
+            # else if v.tensor_order!=1 and ( cpt % 2 )
+                # f << "["
+                # for x in lst[cpt-1]
+                    # f << Float64( v( x ) ).to_string(16) << ","
+                # f << "], "
+            # else
+                # f << "["
+                # for x in v
+                    # f << Float64( x ).to_string(16) << ","
+                # f << "], " # (x).to_string(8)
+        if line_style.size
+            f << ", '$line_style'"
+            
+        if title.size
+            f << ", label = '$title'"
+        
+        f <<< ")"
+        
+        if title.size
+            f <<< "legend( loc = 0 )"
+            
+        f.flush()
+        return cpt_plt++
+        
+    def plot( x, y = [], line_style = "-", title = "" )
+        return g_plot( "plot"    , x, y, line_style, title )
+    def loglog( x, y = [], line_style = "-", title = "" )
+        return g_plot( "loglog"  , x, y, line_style, title )
+    def semilogx( x, y = [], line_style = "-", title = "" )
+        return g_plot( "semilogx", x, y, line_style, title )
+    def semilogy( x, y = [], line_style = "-", title = "" )
+        return g_plot( "semilogy", x, y, line_style, title )
+    def show                  f << "show()" <<< fflush
+    def save( filename )      f << "savefig( '$filename' )" <<< fflush
+    def reassign_xlabel( t )  f << "xlabel( r'$t' )" <<< fflush
+    def reassign_ylabel( t )  f << "ylabel( r'$t' )" <<< fflush
+    def reassign_xgrid( t )   f << "ax = subplot(111); ax.xaxis.grid( $(Int32(t)) )" <<< fflush
+    def reassign_ygrid( t )   f << "ax = subplot(111); ax.yaxis.grid( $(Int32(t)) )" <<< fflush
+    def reassign_xticks( t )   f << "ax = subplot(111); ax.set_xticks(( $(join(Vec[Float64]( t ),",")) ))" <<< fflush
+    def reassign_yticks( t )   f << "ax = subplot(111); ax.set_yticks(( $(join(Vec[Float64]( t ),",")) ))" <<< fflush
+    def reassign_axis ( t )   f << "axis( [ $(join(Vec[Float64](t),",")) ] )" <<< fflush
+    def reassign_grid ( t )   reassign_xgrid( t ); reassign_ygrid( t )
+    def reassign_title( t )   f << "title( '$t' )" <<< fflush
+    def reassign_xmin_xmax( t )  f << "ax = subplot(111); ax.xaxis.set_data_interval( $(t[0]), $(t[1]) )" <<< fflush
+    def reassign_ymin_ymax( t )  f << "ax = subplot(111); ax.yaxis.set_data_interval( $(t[0]), $(t[1]) )" <<< fflush
+    def reassign_use_tex( t ) f << "rc('text', usetex=$(1*Bool(t)))" <<< fflush
+    def set_title( plt, txt ) f << "ax = subplot(111); ax.legend( (plt_$plt[0],), ('$txt',) )" <<< fflush
+
+#~  ~#
+class GnuPlot[ dim = 2 ] inherits GenericPlotDevice[ dim ]
+    f ~= File
+    destroy_pipe := true
+    
+    def init
+        init_using_default_values( self )
+        f.init( executable = "gnuplot", mode = "w" )
+        destroy_pipe = true
+        
+    def destroy
+        if destroy_pipe
+            f.destroy()
+            
+    def plot( varargs )
+        f <<< "plot '-' w l"
+        for value in varargs[0]
+            # if is_of_type_Op( v ) and ( cpt % 2 )
+            f << Float64(value) << " " <<< Float64( varargs[1](value) )
+        f <<< "e"
+        f.flush()
+        
+    def show
+        f <<< "pause -1" << fflush
+
+    def flush
+        for l in labels
+            f <<< "set label \"$(l.second)\" at $(l.first[0]), $(l.first[1]) center"
+        f <<< "plot '-' w lp"
+        for p in points
+            f << p << "\n\n"
+        for l in lines
+            f << l[0] << "\n"
+            f << l[1] << "\n\n"
+        f <<< "e"
+        f.flush()
+
+#~  ~#
+def plot( x, y = [], line_style = "-", title = "" )
+    p := PyLabPlot()
+    p.destroy_pipe = false
+    p.plot( x, y, line_style, title )
+    p.show()
+
+

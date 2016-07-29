@@ -1,0 +1,40 @@
+@relates "chemin/chemin/mot clef", "chemin2/mot clef2"
+
+@question "question"
+    Toto a dit[[bib:ff]]:
+    * c bon
+        ** c bon
+        ** c bon
+    * mais sa fait péter
+
+@feature "basic description"
+    full description <math>x^2</math>
+
+@tutorial "name of tutorial" ["name subpart"] [depends "name subpart"] [number 1.6]
+    full description <math>x^2</math>
+
+commentaire inline (en dehors de @relates...) -> doc de méthode, classe ( doc fichier -> interdit )
+
+##
+@book{
+    ref = "ff",
+    author = "...",
+}   
+##
+
+
+Pour les tests :
+
+namespace test::matrix
+    std_mat = [
+    ]
+    
+    def mon_test_solver
+        assert( b < 1e-6, "..." )
+
+    add_tests( mon_test_solver, mon_test_solver )
+
+namespace test::matrix::iterative
+    def mon_test_solver_2
+        for i in std_mat
+            ...

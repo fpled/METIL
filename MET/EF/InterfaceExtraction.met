@@ -1,0 +1,48 @@
+#~
+
+~#
+class Sst[ dim, Form ]
+    m        := Mesh[ dim = dim ]()
+    p        := Vec[ Float64, dim ]()
+    solution := LazyVec()
+    f        ~= Form
+    
+#~
+
+~#
+class Interf[ dim, Form, T = Float64, ST = SizeType ]
+    m   := Mesh[ dim, T, ST ]()
+    s_0 := Ptr[ Sst[ dim, Form ] ]()
+    s_1 := Ptr[ Sst[ dim, Form ] ]()
+
+#~
+    
+~#
+class InterfaceExtraction[ dim, T, ST ] inherits LazyVecPartAncestor[ ST, Mesh[dim,T,ST]::ExtraData_ElemList ]
+    def init( e1, e2 )
+        init_lazy_obj()
+        add_child( e1 )
+        add_child( e2 )
+    
+    def write_to_stream( stream )
+        stream << "InterfaceExtraction"
+    
+    virtual def get_ScalarType
+        return Float64
+    
+    virtual def get_done
+        return false
+    
+def interface_extraction( m1, m2 )
+    dim := m1.dim; assert( m1.dim == m2.dim, "m1.dim != m2.dim !" )
+    T := type_promote( partial_instanciation m1.T, partial_instanciation m2.T, add )
+    ST := type_promote( partial_instanciation m1.ST, partial_instanciation m2.ST, add )
+    
+    res := Interf[ dim, T, ST ]()
+    for sub_elem_list_1 in m1.elem_list.sub_vecs
+        for sub_elem_list_2 in m2.elem_list.sub_vecs
+            res.m.elem_list.sub_vecs.push_back(
+                new InterfaceExtraction[ dim, T, ST ]( sub_elem_list_1, sub_elem_list_2 )
+            )
+    return res
+    

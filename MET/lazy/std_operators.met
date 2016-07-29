@@ -1,0 +1,79 @@
+
+#
+class Add
+    property commutative_op, is_an_Add, is_an_Operator
+    static def ReturnType( T1, T2 ) return type_promote( partial_instanciation T1, partial_instanciation T2, add )
+    static def apply( a, b )        return a + b
+    static def write_to_stream( s ) s << "Add"
+    static def get_met_repr         return "add"
+    static const precedance := 10
+    
+#
+class Sub
+    property is_a_Sub, is_an_Operator
+    static def ReturnType( T1, T2 ) return type_promote( partial_instanciation T1, partial_instanciation T2, sub )
+    static def apply( a, b )        return a - b
+    static def write_to_stream( s ) s << "Sub"
+    static def get_met_repr         return "sub"
+    static const precedance := 20
+    
+#
+class Mul
+    property commutative_op, is_a_Mul, is_an_Operator
+    static def ReturnType( T1, T2 ) return type_promote( partial_instanciation T1, partial_instanciation T2, mul )
+    static def apply( a, b )        return a * b
+    static def write_to_stream( s ) s << "Mul"
+    static def get_met_repr         return "mul"
+    static const precedance := 30
+    
+    
+#
+class Div
+    property is_a_Div, is_an_Operator
+    static def ReturnType( T1, T2 ) return type_promote( partial_instanciation T1, partial_instanciation T2, div )
+    static def apply( a, b )        return a / b
+    static def write_to_stream( s ) s << "Div"
+    static def get_met_repr         return "div"
+    static const precedance := 40
+
+#
+class Pow
+    property is_a_Pow, is_an_Operator
+    static def ReturnType( T1, T2 ) return type_promote( partial_instanciation T1, partial_instanciation T2, pow )
+    static def apply( a, b )        return a ^ b
+    static def write_to_stream( s ) s << "Pow"
+    static def get_met_repr         return "pow"
+    static const precedance := 50
+    
+    
+#
+class Heaviside
+    property is_an_Operator
+    static def ReturnType( T1 )  return T1
+    static def apply( a )        return heaviside( a )
+    static def write_to_stream( s ) s << "Heaviside"
+    static def get_met_repr         return "heaviside"
+    static const precedance := 0
+    
+
+def equal( a, b ) when a.is_an_Operator and b.is_an_Operator
+    return type_of( a ) == type_of( b )
+
+
+#
+class Inferior
+    property is_an_Operator
+    static def ReturnType( T1, T2 ) return type_promote( partial_instanciation T1, partial_instanciation T2, inferior )
+    static def apply( a, b )        return a < b
+    static def write_to_stream( s ) s << "Inferior"
+    static def get_met_repr         return "inferior"
+    static const precedance := 0
+
+#
+class Superior
+    property is_an_Operator
+    static def ReturnType( T1, T2 ) return type_promote( partial_instanciation T1, partial_instanciation T2, superior )
+    static def apply( a, b )        return a > b
+    static def write_to_stream( s ) s << "Superior"
+    static def get_met_repr         return "superior"
+    static const precedance := 0

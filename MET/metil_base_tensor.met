@@ -1,0 +1,411 @@
+
+#~
+
+~#
+class Tensor[ T, s=[], ST=SizeType ]
+    property is_a_tensor
+    property has_for_with_index_and_values
+    static const tensor_order := s.size
+    static const sizes := s
+    property has_static_sizes
+    static const static_sizes := s
+    static def EqTypeWithScalarType( TO ) return Tensor[ TO, s, ST ]
+    static def get_scalar_type return T
+    
+    data ~= Array[ T, sizes ]
+    base ~= String
+    
+    def init
+        data.init( default_value = T() )
+        # for v, cpt in data
+            # v.init()
+        base.init("pouet")
+    
+    # def init( tensor ) when tensor.tensor_order == tensor_order
+        # base.init("pouet")
+        # data.init()
+        # for ind, val in data
+            # val.init( tensor[ ind ] )
+    
+    def init( tensor ) when tensor.is_a_matrix pertinence 3
+        assert( tensor_order == 2, "Matrix -> Tensor imply Tensor.tensor_order==2" )
+        base.init("pouet")
+        data.init()
+        for ind, val in data
+            val.init( tensor[ ind[0], ind[1] ] )
+    
+    def get_size
+        assert( tensor_order == 1, "size defined only if tensor_order == 1" )
+        return s[0]
+
+    def init( function ) when function.is_a_function pertinence 1
+        base.init("pouet")
+        data.init( default_value = T() )
+        for ind, v in data
+            data[ind] = function( ind )
+    
+    def init( vec ) when vec.tensor_order == tensor_order
+        init()
+        #
+        for ind, val in indices_and_values_of( vec )
+            self[ ind ] = val
+    
+    def init( val ) when val.tensor_order <= 0
+        init()
+        data.init( default_value = val )
+    
+    def destroy
+        data.destroy()
+        base.destroy()
+    
+    def write_to_stream( stream )
+        # stream <<< "tensor data:"
+        stream << data
+        # stream <<< "tensor base:"
+        # stream <<< base
+    
+    def get_attr( str )
+        return IndexedTensor( self, str )
+    
+    def get_diag
+        return DiagFromTensor( self )
+    
+    def select( ind ) when ind.tensor_order == 1 pertinence 4
+        return data[ ind ]
+    
+    def select( varargs ) pertinence 2
+        return data[ varargs ]
+    #
+    def display_tex pertinence 10  data.display_tex()
+    def get_nb_rows                return s[0]
+    def get_nb_cols                return s[1]
+    def get_values                 return data.values
+    #
+    def __for__( block )
+        for ind, val in data
+            block( make_varargs( ind, val ) )
+    #
+    def subs( a, b ) pertinence 10
+        res := Tensor[T,s,ST]()
+        for ind, val in res
+            val = self[ ind ].subs( a, b )
+        return res
+    #
+    def diff( a ) pertinence 10
+        res := Tensor[T,s,ST]()
+        for ind, val in res
+            val = self[ ind ].diff( a )
+        return res
+    #
+    def get_lower_and_diag_values
+        res := Vec[T]()
+        for ind, val in self
+            if ind[0] >= ind[1]
+                res.push_back( val )
+        return res
+    #
+    def eig_vectors_and_values( e_val, e_vec )
+        data.eig_vectors_and_values( e_val, e_vec )
+        
+    #
+    def get_additional_cpp_methods 
+        if tensor_order != 1
+            return ""
+        return "
+    ST size() const { return $(s[0]); }
+    ST reserved() const { return $(s[0]); }
+    const T &operator[]( ST i ) const { return data.data[ i ]; }
+    T &operator[]( ST i ) { return data.data[ i ]; }
+        "
+
+##   ##
+def diff( self, a ) when self.tensor_order<=0 and a.is_a_tensor pertinence 10
+    res := Tensor[a.T,a.s,a.ST]()
+    for ind, val in res
+        val = self.diff( a[ ind ] )
+    return res
+    
+## ##
+def subs( self, a, b ) when a.is_a_tensor and b.is_a_tensor
+    res := self
+    for ind, val in a
+        res = res.subs( val, b[ind] )
+    return res
+    
+def add( a, b ) when a.is_a_tensor and b.tensor_order<=0
+    T := type_promote( partial_instanciation a.T, b, add )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( a[ind] + b )
+    return res
+
+def add( b, a ) when a.is_a_tensor and b.tensor_order<=0
+    T := type_promote( partial_instanciation a.T, b, add )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( b + a[ind] )
+    return res
+
+def add( a, b ) when a.is_a_tensor and b.is_a_tensor
+    assert( a.tensor_order == b.tensor_order, "non concordant tensor_order ( $(a.tensor_order) and $(b.tensor_order)" ) # TODO -> promote
+    T := type_promote( partial_instanciation a.T, partial_instanciation b.T, add )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( a[ind] + b[ind] )
+    return res
+
+def sub( a, b ) when a.is_a_tensor and b.tensor_order<=0
+    T := type_promote( partial_instanciation a.T, b, sub )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( a[ind] - b )
+    return res
+
+def sub( b, a ) when a.is_a_tensor and b.tensor_order<=0
+    T := type_promote( partial_instanciation a.T, b, sub )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( b - a[ind] )
+    return res
+
+def sub( a, b ) when a.is_a_tensor and b.is_a_tensor
+    assert( a.tensor_order == b.tensor_order, "non concordant tensor_order ( $(a.tensor_order) and $(b.tensor_order)" ) # TODO -> promote
+    T := type_promote( partial_instanciation a.T, partial_instanciation b.T, sub )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( a[ind] - b[ind] )
+    return res
+
+def mul( a, b ) when a.is_a_tensor and b.tensor_order<=0
+    T := type_promote( partial_instanciation a.T, b, mul )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( a[ind] * b )
+    return res
+
+def mul( b, a ) when a.is_a_tensor and b.tensor_order<=0
+    T := type_promote( partial_instanciation a.T, b, mul )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( b * a[ind] )
+    return res
+
+def mul( a, b ) when a.is_a_tensor and b.is_a_tensor and a.tensor_order==1 and b.tensor_order==1
+    T := type_promote( partial_instanciation a.T, partial_instanciation b.T, mul )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( a[ind] * b[ind] )
+    return res
+
+def div( a, b ) when a.is_a_tensor and b.tensor_order<=0
+    T := type_promote( partial_instanciation a.T, b, div )
+    res := Tensor[T,a.s,a.ST]()
+    for ind, val in res.data val.init( a[ind] / b )
+    return res
+
+def doubledot( a, b ) when a.tensor_order >= 2 and b.tensor_order >= 2
+    T := type_promote( partial_instanciation a.T, partial_instanciation b.T, mul )
+    # -> scalar
+    if a.tensor_order==2 and b.tensor_order==2
+        assert( a.sizes == b.sizes, "a : b with tensor of different sizes ($(a.sizes) != $(b.sizes))" )
+        res := T( 0 )
+        for i in 0 .. a.sizes[0]
+            for j in 0 .. a.sizes[1]
+                res += a[[i,j]] * b[[i,j]]
+        return res
+    # -> tensor
+    if a.tensor_order > b.tensor_order
+        ns := a.tensor_order - b.tensor_order
+        s := Vec[a.ST,ns]( a.s[ 0 .. ns ] )
+        res := Tensor[ T, s, a.ST ]( function = x => 0 )
+        for ind, val in a
+            res[ ind[ 0 .. ns ] ] += val * b[ ind[ ns .. a.tensor_order ] ]
+        return res
+    ns  := b.tensor_order - a.tensor_order
+    sel := b.tensor_order - ns .. b.tensor_order
+    s := Vec[a.ST,ns]( b.s[ sel ] )
+    res := Tensor[ T, s, a.ST ]( function = x => 0 )
+    for ind, val in b
+        res[ ind[ sel ] ] += a[ ind[ 0 .. a.tensor_order ] ] * val
+    return res
+
+
+#~
+~#
+def tensorial_product( a, b )
+    T := type_promote( partial_instanciation a.T, partial_instanciation b.T, mul )
+    res := Tensor[ T, a.s +++ b.s ]()
+    for ind_a, val_a in a
+        for ind_b, val_b in b
+            res[ ind_a +++ ind_b ] = val_a * val_b
+    return res
+    
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------
+
+## tensor_perm( "ijk", "kij" ) -> 2 0 1 ##
+def tensor_perm( s1, s2 )
+    s := s1.size
+    perm_ind := Vec[Int32,s]()
+    for i in 0 .. s
+        perm_ind[ i ].init( s1.index_of_first_item_equal_to( s2[i], -1 ) )
+        assert( perm_ind[ i ] >= 0, "free indice in tensor addition ( T.$s1 and T.$s2 )" )
+    return perm_ind
+
+## tensor.ij gives an object of type IndexedTensor ##
+class IndexedTensor
+    property is_an_indexed_tensor
+    tensor := InternalVariable()
+    str := ""
+    
+    def init( tensor, str )
+        assert( tensor.tensor_order == str.size, "indexation of a tensor pb (nb index != tensor order)." )
+        self.tensor.init_using_var( tensor )
+        self.str.init( str )
+    # def conversion_to( b )
+        # b.init( all( self ) )
+        
+    def init( t ) when t.is_an_indexed_tensor
+        assert( t.str.size == str.size, "nb indices do not correspond ($(t.str) and $str)" )
+        perm_ind := tensor_perm( str, t.str )
+        for index, v in tensor->data
+            v.init( t.tensor->data[ index[perm_ind] ] )
+            
+    def reassign( t ) when t.is_an_indexed_tensor
+        assert( t.str.size == str.size, "nb indices do not correspond ($(t.str) and $str)" )
+        perm_ind := tensor_perm( str, t.str )
+        for index, v in tensor->data
+            v = t.tensor->data[ index[perm_ind] ]
+    
+    def write_to_stream( stream )
+        stream << "indexed_tensor with indices = " <<< str
+        stream <<< @tensor
+        
+    def get_tensor_order
+        return tensor->tensor_order
+        
+    def get_T
+        return tensor->T
+    
+    def get_ST
+        return tensor->ST
+        
+    def get_sizes
+        return tensor->sizes
+
+    def display_tex pertinence 10
+        tensor->display_tex()
+        
+## see add( a, b ) when a.is_an_indexed_tensor and b.is_an_indexed_tensor, sub(a,b)... ##
+def term_op_term_tensor( a, b, op )
+    assert( a.sizes == b.sizes, "sizes are not the same ($(a.sizes) and $(b.sizes))" )
+    tensor := Tensor[ a.T, a.sizes ](); res := IndexedTensor( tensor, a.str )
+    #
+    perm_ind := tensor_perm( a.str, b.str )
+    for ind, v in tensor.data
+        v.init( op( a.tensor->select( ind ), b.tensor->select( ind[perm_ind] ) ) )
+    return res
+
+def add( a, b ) when a.is_an_indexed_tensor and b.is_an_indexed_tensor
+    return term_op_term_tensor( a, b, add )
+
+def sub( a, b ) when a.is_an_indexed_tensor and b.is_an_indexed_tensor
+    return term_op_term_tensor( a, b, sub )
+
+def sub( a ) when a.is_an_indexed_tensor
+    tensor := Tensor[ a.T, a.sizes ]()
+    tensor.data.init( - a.tensor->data )
+    return IndexedTensor( tensor, a.str )
+    
+def mul( a, b ) when a.is_an_indexed_tensor and b.is_an_indexed_tensor
+    ST := a.ST
+    T := type_promote( partial_instanciation a.T, partial_instanciation b.T, mul )
+    # common_indices
+    common_indices := ""
+    free_indices   := ""
+    common_ranges  := VarArgs()
+    perm_a         := Vec[ ST, a.tensor_order ]( default_value = 666 )
+    perm_b         := Vec[ ST, b.tensor_order ]( default_value = 666 )
+    res_sizes      := Vec[ ST ]()
+    for i in 0 .. a.str.size
+        j := b.str.index_of_first_item_equal_to( a.str[i], -1 )
+        if j >= 0
+            perm_a[i].init( - 1 - common_indices.size )
+            perm_b[j].init( - 1 - common_indices.size )
+            if not ( a.str[i] in common_indices )
+                assert( a.tensor->sizes[j] == b.tensor->sizes[i], "summation with different sizes ( $(a.tensor->sizes[j]) and $(b.tensor->sizes[i]) )" )
+                common_indices += a.str[i]
+                common_ranges.push_unnamed( 0 .. a.tensor->sizes[i] )
+        else
+            perm_a[i].init( free_indices.size )
+            free_indices += a.str[i]
+            res_sizes.push_back( a.tensor->sizes[i] )
+    for i in 0 .. b.str.size
+        j := a.str.index_of_first_item_equal_to( b.str[i], -1 )
+        if j < 0
+            perm_b[i].init( free_indices.size )
+            free_indices += b.str[i]
+            res_sizes.push_back( b.tensor->sizes[i] )
+    #
+    for v in perm_a  if v < 0  v = free_indices.size - v - 1
+    for v in perm_b  if v < 0  v = free_indices.size - v - 1
+    # -> scalar
+    if not free_indices.size
+        res := T(0)
+        for cpt_com in rectilinear( common_ranges )
+            res += a.tensor->select( cpt_com[perm_a] ) * b.tensor->select( cpt_com[perm_b] )
+        return res
+    # -> tensor
+    res := Tensor[ T, res_sizes ]()
+    for ind, v in res.data
+        tmp := T(0)
+        for cpt_com in rectilinear( common_ranges )
+            v := Vec[ST]( ind +++ cpt_com )
+            tmp += a.tensor->select( v[perm_a] ) * b.tensor->select( v[perm_b] )
+        v.init( tmp )
+    #
+    return IndexedTensor( res, free_indices )
+
+## tensor_id(  ) ##
+# def tensor_id( varargs )
+def identity_tensor( n )
+    return Tensor[ Int32, [n,n] ]( function = x => x[0]==x[1] )
+
+def trace( a ) when a.tensor_order >= 2
+    res := a.T(0)
+    for i in 0 .. min( a.sizes )
+        v := vec_cst( size = a.tensor_order, val = i )
+        res += a[ v ]
+    return res
+
+def dev( a ) when a.tensor_order==2
+    id  := identity_tensor( a.nb_rows )
+    return a - id * trace( a ) / trace( id )
+
+def von_mises( a ) when a.tensor_order==2
+    dim := a.nb_rows
+    d := dev( a )
+    if dim == 3
+        return sqrt( 3 / 2 * d : d )
+    if dim == 2
+        return sqrt( 2 * d : d )
+
+def sym_part( a ) when a.is_a_tensor and a.tensor_order==2
+    res := Tensor[a.T,a.s,a.ST]()
+    for ind, val in res
+        val = ( a[ ind[0], ind[1] ] + a[ ind[1], ind[0] ] ) / 2
+    return res
+
+def asym_part( a ) when a.is_a_tensor and a.tensor_order==2
+    res := Tensor[a.T,a.s,a.ST]()
+    for ind, val in res
+        val = ( a[ ind[0], ind[1] ] - a[ ind[1], ind[0] ] ) / 2
+    return res_sizes
+
+# ----------------------------------------------------------------------------------------------------------------------------------------
+class DiagFromTensor
+    static const tensor_order := 1
+    
+    tens := InternalVariable()
+    
+    def init( t )
+        tens.init_using_var( t )
+    def get_size
+        return min( tens->sizes )
+    def select( i )
+        return tens->select( vec_cst( tens->tensor_order, i ) )
+
+
+

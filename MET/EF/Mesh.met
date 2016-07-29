@@ -1,0 +1,43 @@
+import "Field.met"
+import "ElemList.met"
+import "read_mesh.met"
+# import "InterfaceExtraction.met"
+
+#~
+~#
+class Mesh[ dim = 3, T = Float64, ST = SizeType ] inherits FieldSupport
+    property is_a_Mesh
+    static const Pvec := Vec[ T, dim ]
+    static const ExtraData_ElemList := Vec[ST]
+
+    nb_nodes_per_sub_vec := 50000
+    nb_elems_per_sub_vec := 50000
+    
+    elem_list := LazyVec[ ST, ExtraData_ElemList ]()
+    node_list := LazyVec[ ST ]()
+    
+    def init( str ) when str.type == String and str.ends_by(".metmesh")
+        init_using_default_values( self )
+        read_mesh( self, str )
+    
+    # 
+    def new_field( TD = T, interpolation = "nodal", unit = "", default_value = TD(), met_name = "", tex_name = met_name )
+        res := Field[ TD ]()
+        init_field_( res, TD, interpolation, unit, default_value, met_name, tex_name )
+        return res
+        
+    # 
+    def init_field_( res, TD, interpolation, unit, default_value, met_name, tex_name )
+        res.unit = unit
+        res.support = &self
+        res.met_name = met_name
+        res.tex_name = tex_name
+        for TE in elem_list.sub_types
+            TE::sym_elt.make_interpolation( res.interpolations[ String(TE::NE) ], interpolation, met_name, tex_name )
+        for nl in node_list.sub_vecs
+            res.data.sub_vecs_push_back(
+                 new LazyVecPartOperatorCstValue[ res.T, ST ]( nl->size, 0 )
+            )
+
+    virtual def get_spdim
+        return dim

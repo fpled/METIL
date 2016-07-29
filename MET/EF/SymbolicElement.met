@@ -1,0 +1,877 @@
+import "ParametricElement.met"
+import "mechanical_tensors.met"
+
+#~
+~#
+class SymbolicElementAncestor
+    virtual def grad( expr )                                                          abstract
+    virtual def grad_sym( expr )                                                      abstract
+    virtual def grad_asym( expr )                                                     abstract
+    virtual def div( expr )                                                           abstract
+    virtual def var_inter_for_pos( p, nb_iterations = 1 )                             abstract
+    virtual def point_is_inside( p, nb_iterations = 1, tolerance = 0 )                abstract
+    virtual def var_inter_is_inside( vi, tolerance = 0 )                              abstract
+    virtual def extrusion_with_normals( normals, alpha )                              abstract
+    virtual def var_inter_and_alpha_with_normals( normals, point, nb_iterations = 1 ) abstract
+    virtual def projection_with_normals( normals, point, nb_iterations = 1 )          abstract
+    virtual def get_shape_functions( interpolation_base )                             abstract
+    virtual def get_shape_functions_vertex                                            abstract
+    virtual def get_generic_shape_functions( interpolation_base, deg )                abstract
+    virtual def get_name                                                              abstract
+    virtual def get_name_for_gauss_point                                              abstract
+    virtual def get_nb_dim                                                            abstract
+    virtual def get_nb_nodes_                                                         abstract
+    virtual def children( nvi )                                                       abstract
+    virtual def var_inter_for_node_nb( num_node )                                     abstract
+    virtual def var_inter_                                                            abstract
+    virtual def node_number_is_a_vertex( i )                                          abstract
+    virtual def point_is_a_vertex( p )                                                abstract
+    virtual def point_is_on_edge( p )                                                 abstract
+
+#~
+~#
+class SymbolicElement[ TE, dim = Int32( TE::nvi ) ] inherits SymbolicElementAncestor
+    static const pe       := ParametricElement[ TE, dim ]()
+    static const nb_nodes := pe.nb_nodes
+    static const nb_vertex_nodes := pe.nb_vertex_nodes
+    static const nvi      := pe.nvi # nb interpolation variables
+    
+    pos_nodes := Vec[ Vec[ Op, dim ], nb_nodes ]()
+    var_inter := Vec[ Op, nvi ]()
+    name_elem := ""
+    name_node := ""
+    _children := Vec[ Vec[ Ptr[ SymbolicElementAncestor ] ], nvi + 1 ]()
+    _alternate_pos := Vec[ Op, dim ]()
+    _want_alternate_pos := 0
+    
+    assume_const_jac := 0
+    num_child        := -1 # if self is a child elem
+    sub_nvi          := -1 # if self is a child elem
+    tex_symbol_pos   := ""
+    node_numbers_to_node_numbers_in_parent_cpp := Vec[ Int32 ]()
+    
+    # interval for integration
+    def get_interval_var_inter
+        return pe.interval_var_inter( var_inter )
+    
+    #
+    def destroy
+        for i in 1 .. nvi + 1
+            for c in _children[ i ]
+                delete c
+    
+    #
+    virtual def get_nb_nodes_
+        return nb_nodes
+    
+    #
+    virtual def var_inter_
+        return var_inter
+    
+    #
+    virtual def get_bubble_function
+        res := Op( 0 )
+        for s in get_shape_functions( "lagrange" )
+            res *= s
+        res /= res.subs( var_inter, get_center_of_var_inter() ) # HUM !!!!
+        return res
+    
+    #
+    virtual def var_inter_for_node_nb( num_node )
+        return TE::points[ num_node ]
+    
+    #
+    virtual def get_name
+        return String( TE )
+    
+    #
+    virtual def get_nb_dim
+        return dim
+        
+    # renvoie une liste de pointeurs vers éléments enfant de sub_nvi-ième génération.
+    virtual def children( sub_nvi )
+        if sub_nvi > nvi
+            return []
+        if _children[ 0 ].size == 0
+            _children[ 0 ] = [ this ]
+            for local_sub_nvi in 1 .. nvi + 1
+                for num_child in 0 .. pe.nb_children( local_sub_nvi )
+                    TC := pe.type_child( local_sub_nvi, num_child )
+                    ns := new SymbolicElement[ TC, dim ](
+                        name_elem, name_node,
+                        node_numbers_to_node_numbers_in_parent_cpp = node_numbers_to_node_numbers_in_parent_cpp[ pe.node_number_child( local_sub_nvi, num_child ) ]
+                    )
+                    ns->num_child = num_child
+                    ns->sub_nvi   = local_sub_nvi
+                    _children[ local_sub_nvi ].push_back( ns )
+        return _children[ sub_nvi ]
+        
+    #
+    def std_pos_symbol_function( num_node, d )
+        letters := "xyztuvw"
+        return symbol( "$name_node($num_node)->pos[$d]", tex_symbol_pos + "_{$num_node}^{$(letters[d])}" )
+        
+    #
+    def init( name_elem = "elem", name_node = name_elem + ".node", pos_symbol_function = std_pos_symbol_function, tex_symbol_pos = "P", node_numbers_to_node_numbers_in_parent_cpp = range(nb_nodes).map( TE::corr_cpp ) )
+        init_using_default_values( self )
+        self.tex_symbol_pos = tex_symbol_pos
+        self.name_elem = name_elem
+        self.name_node = name_node
+        self.node_numbers_to_node_numbers_in_parent_cpp = node_numbers_to_node_numbers_in_parent_cpp[ 0 .. nb_nodes ]
+        for num_node in 0 .. nb_nodes
+            for d in 0 .. dim
+                pos_nodes[num_node][d] = pos_symbol_function( node_numbers_to_node_numbers_in_parent_cpp[ num_node ], d )
+        #
+        var_inter.init( x => symbol("var_inter[$x]",greek_letter(6+x)) )
+    
+    #
+    def get_pos
+        if _want_alternate_pos
+            return _alternate_pos
+        return Vec[ Op ]( pe.interpolation( var_inter, pos_nodes, "lagrange" ) )
+    
+    #
+    def interpolation( val_on_nodes, interpolation_base = "lagrange" )  return pe.interpolation( var_inter, val_on_nodes, interpolation_base )
+    def interpolation_vertex( val_on_vertex_nodes )                     return pe.interpolation_vertex( var_inter, val_on_vertex_nodes )
+    def generic_interpolation( val_on_points, interpolation_base, deg ) return pe.generic_interpolation( var_inter, val_on_points, interpolation_base, deg )
+    def get_normal                                                      return pe.normal( var_inter, pos_nodes )
+    def get_measure                                                     return pe.measure( var_inter, pos_nodes )
+    def get_barycenter                                                  return pe.barycenter( var_inter, pos_nodes )
+    def get_inertia_operator_for_barycenter                             return pe.inertia_operator_for_barycenter( var_inter, pos_nodes )
+    def get_center_of_var_inter                                         return pe.center_of_var_inter # Ex : Bar -> [1/2]; Triangle -> [1/3 1/3]; ...
+    def get_points                                                      return TE::points # Ex : Bar -> [1/2]; Triangle -> [1/3 1/3]; ...
+    def val_nodes_from_lower_degree(l)                                  return TE::val_nodes_from_lower_degree(l)
+    def lower_degree_element                                            return TE::get_lower_degree_element
+    def upper_degree_element                                            return TE::get_upper_degree_element
+    def generic_element(n)                                              return TE::get_generic_element(n)
+    def generic_points(n)                                               return TE::get_generic_points(n)
+    
+    # Ex : triangle_6.set_pos_field_as_it_was_from_lower_degree_element() will set triangle_6.pos = standard pos for a Triangle
+    def set_field_as_it_was_from_lower_degree_element( field )
+        tmp_e := SymbolicElement[ TE::lower_degree_element ]()
+        val_nodes := Vec[ field.type ]()
+        for num_node in 0 .. tmp_e.nb_nodes
+            val_nodes.push_back( field.subs( var_inter, tmp_e.points[ num_node ] ) )
+        field = tmp_e.interpolation( val_nodes, "lagrange" ).subs( tmp_e.var_inter, var_inter )
+        return field
+    
+    # Ex : triangle_6.set_pos_field_as_it_was_from_lower_degree_element() will set triangle_6.pos = standard pos for a Triangle
+    def set_pos_field_as_it_was_from_lower_degree_element
+        tmp_e := SymbolicElement[ TE::lower_degree_element ]()
+        for num_node in 0 .. tmp_e.nb_nodes
+            tmp_e.pos_nodes[ num_node ] = pos.subs( var_inter, tmp_e.points[ num_node ] )
+        _alternate_pos = tmp_e.pos.subs( tmp_e.var_inter, var_inter )
+        _want_alternate_pos = true
+    
+    #
+    def var_inter_from_child_var_inter( sub_nvi, num_child, child_var_inter )
+        return pe.var_inter_from_child_var_inter( sub_nvi, num_child, child_var_inter )
+    
+    #~
+    
+    ~#
+    def projection_on_child_elem( expression, child_elem )
+        c := child_cast( child_elem )
+        return expression.subs( var_inter, var_inter_from_child_var_inter( c->sub_nvi, c->num_child, c->var_inter ) )
+    
+    #
+    def get_jac_mat
+        if assume_const_jac
+            return pe.jac_mat( Vec[ Op, nvi ](pe.center_of_var_inter), pos_nodes )
+        return pe.jac_mat( var_inter, pos_nodes )
+    
+    #
+    def get_jac
+        if assume_const_jac
+            return pe.jac( Vec[ Op, nvi ](pe.center_of_var_inter), pos_nodes )
+        return pe.jac( var_inter, pos_nodes )
+    
+    #
+    def get_inv_jac_mat
+        if assume_const_jac
+            return pe.inv_jac_mat( Vec[ Op, nvi ](pe.center_of_var_inter), pos_nodes )
+        return pe.inv_jac_mat( var_inter, pos_nodes )
+    
+    #
+    def get_order_interpolation
+        res := Vec[ Int32, nvi ]( 0 )
+        i := interpolation( Vec[ Op, nb_nodes ]( x => symbol("toto") ), "lagrange" )
+        for num_vi in 0 .. nvi
+            tmp := -1
+            i_d := i
+            while not assumed( i_d == 0 )
+                i_d = i_d.diff( var_inter[ num_vi ] )
+                tmp++
+            res[ num_vi ] = tmp
+        return res
+    
+    # 
+    def dot_prod_( p0, p1 )
+        degre_poly := ( p0 * p1 ).poly_deg( var_inter )
+        return integration( p0 * p1, mul_by_jac = false, order_diff = degre_poly )
+    
+    #
+    def pol_inde_( lst_pol )
+        si := lst_pol.size
+        m := Mat[ Rationnal, Sym[ si ] ]()
+        for ind, val in m
+            val = dot_prod_( lst_pol[ ind[0] ], lst_pol[ ind[1] ] ).value()
+        return m.det
+    
+    #
+    def shape_functions_der( variable, sym )
+        res := Vec[ Op ]()
+        for s in sym
+            shape_function := variable.diff( s )
+            for vi in var_inter
+                d := shape_function.diff( vi )
+                if assumed( d == 0 ) == false and pol_inde_( res +++ [ d ] )
+                    ds := d.subs( var_inter, var_inter * 0 )
+                    if not assumed( d == 0 )
+                        d /= ds
+                    res.push_back( d )
+        return res
+    
+    # integration
+    def integration( expr, mul_by_jac = true, order_diff = 6, want_interval_assumptions = false )
+        res := scalar_conversion( Op, expr )
+        if mul_by_jac
+            res *= get_jac()
+        # interval_var_inter := pe.interval_var_inter( var_inter ) 
+        # res = integration( res, var_inter[1], interval_var_inter[1][0], interval_var_inter[1][1], order_diff ) # res.display_tex()
+        # info res
+        # res.display_tex()
+        # tmp := res
+        # res = 0
+        # for i in 0..101
+            # res += tmp.subs( var_inter[0], interval_var_inter[0][0] + ( interval_var_inter[0][1] - interval_var_inter[0][0] ) * i / 100 )
+        # return res
+        
+        #
+        if want_interval_assumptions
+            my_var_inter := Vec[ Op ]()
+            for v in var_inter
+                my_var_inter.push_back( symbol( String( v.tex_string() ) + "^k" ) )
+            #
+            subs_b := Vec[ Op ]()
+            subs_e := Vec[ Op ]()
+            for i in 0 .. var_inter.size
+                b := Op( pe.interval_var_inter( my_var_inter )[ i ][ 0 ] )
+                e := Op( pe.interval_var_inter( my_var_inter )[ i ][ 1 ] )
+                if b.beg_value_valid()
+                    my_var_inter[i].set_beg_value( b.beg_value(), false )
+                if e.end_value_valid()
+                    my_var_inter[i].set_end_value( e.end_value(), false )
+                subs_b.push_back( var_inter   [i] )
+                subs_e.push_back( my_var_inter[i] )
+            res = res.subs( subs_b, subs_e )
+            #
+            interval_var_inter := pe.interval_var_inter( my_var_inter ) 
+            for i in ( 0 .. nvi ).reversed
+                res = integration( res, my_var_inter[i], interval_var_inter[i][0], interval_var_inter[i][1], order_diff )
+            return res
+            
+        # ->no interval assumption
+        interval_var_inter := pe.interval_var_inter( var_inter ) 
+        for i in ( 0 .. nvi ).reversed
+            res = integration( res, var_inter[i], interval_var_inter[i][0], interval_var_inter[i][1], order_diff )
+        return res
+
+    # bestial numerical integration
+    def bestial_num_integration( expr, mul_by_jac = true, div_ = 25 )
+        res   := Op( 0 )
+        expr_ := expr
+        if mul_by_jac
+            expr_ *= get_jac()
+        for p in rectilinear( 0..div_+1, nvi )
+            v := p / div_
+            if var_inter_is_inside( v )
+                res += expr_.subs( var_inter, v )
+        return res / div_ ^ nvi
+    
+    #
+    virtual def get_name_for_gauss_point
+        return TE::name_for_gauss_point
+
+    # gauss numerical integration
+    def gauss_num_integration( expr, mul_by_jac = true, order_diff = 6 )
+        res := scalar_conversion( Op, expr )
+        if mul_by_jac
+            res *= get_jac() 
+        return TE::gauss_integration( res, order_diff, var_inter )
+    
+    # eval on a single (gauss) point
+    def eval_on_gauss_pts( expr, mul_by_jac = true, order_diff = 6 )
+        res := scalar_conversion( Op, expr )
+        # points de gauss dans repere globale
+        pts := Vec[ Op ]()
+        we  := symbol("gauss_point.weight")
+        for i in 0 .. dim
+            pts.push_back(symbol("gauss_point.positions[$i]"))
+        # passage dans repere local    
+        local_pos := var_inter_for_pos(pts)
+        if mul_by_jac
+            res *= get_jac() 
+        return we * res.subs(var_inter,local_pos)
+    
+    # mean
+    def mean( expr )
+        degre_poly := expr.poly_deg( var_inter )
+        if degre_poly < 0
+            degre_poly = 2 * max( get_order_interpolation() )
+        return integration( expr, mul_by_jac = false ) / integration( Op( 1 ), mul_by_jac = false, order_diff = degre_poly )
+    
+    # inertia operator for barycenter
+    def get_inertia_operator_for_G( nb_iterations = 1 )
+        P := pos
+        G := get_G( nb_iterations )
+        GP := Vec[ Op, dim ]( P - G )
+        #
+        if nvi == 3
+            mat := Mat[ Op, Gen[ dim, dim ] ]()
+            u := Vec[ Op, dim ]( function = x => symbol("u[$x]","u_{$x}") )
+            V := vect_prod( GP, vect_prod( u, GP ) )
+            for d_i in 0 .. dim
+                for d_j in 0 .. dim
+                    degre_poly := ( V[d_i].diff( u[d_j] ) ).poly_deg( var_inter )
+                    mat[d_i,d_j] = integration( V[d_i].diff( u[d_j] ), mul_by_jac = true, order_diff = degre_poly )
+            return mat
+        #
+        else
+            degre_poly := ( dot( GP, GP ) ).poly_deg( var_inter )
+            res := integration( dot( GP, GP ), mul_by_jac = true, order_diff = degre_poly )
+            return res
+    
+    # helper function -> give a new "field" based on "canonical" interpolation
+    def new_variable( name, interpolation_type, deg, nb_dim = [], sym = Vec[ Op ](), symm = false ) when interpolation_type == "canonical"
+        base := Vec[ Op ]()
+        for order in 0 .. (deg+1)
+            for comb in ConstantSumList( sum = order, list_size = nvi )
+                base.push_back( product( var_inter ^ comb ) )
+        bs := base.size
+        if nb_dim.size == 0
+            vec := Vec[ Op, bs ]()
+            for i in 0 .. vec.size
+                s := Op()
+                if name.type != String
+                    s = name( i )
+                else
+                    s = symbol("$name[$i]","$name^{N$i}")
+                sym.push_back( s )
+                vec[i] = s
+            # info vec
+            return pe.interpolation( dot( vec, base ) )
+        if nb_dim.size == 1
+            d := nb_dim[0]
+            vec := Vec[ Vec[ Op, d ], bs ]()
+            for i in 0 .. bs
+                for j in 0 .. d
+                    s := Op()
+                    s = symbol("$name[$i][$j]","$name^{N$i}_{$j}")
+                    sym.push_back( s )
+                    vec[i][j] = s
+            return Vec[ Op, d ]( dot( vec, base ) )
+        if nb_dim.size == 2
+            TR := [ Mat[ Op, Gen[ nb_dim[0], nb_dim[1] ] ], Mat[ Op, Sym[ nb_dim[0] ] ] ][ symm ]
+            mat := Vec[ TR, bs ]()
+            for i in 0 .. bs
+                for j in 0 .. nb_dim[0]
+                    for k in 0 .. nb_dim[1]
+                        if symm and k > j
+                            continue
+                        s := Op()
+                        s = symbol("$name[$i]($j,$k)","$name^{N$i}_{$j,$k}")
+                        sym.push_back( s )
+                        mat[i][j,k] = s
+                if symm
+                    for j in 0 .. nb_dim[0]
+                        for k in j+1 .. nb_dim[1]
+                            mat[i][j,k] = mat[i][k,j]
+            return TR( dot( vec, base ) )
+        assert( 0, "TODO" )
+    
+    # helper function -> give a new "field" based on "canonical" interpolation
+    def new_variable( name, interpolation_type, nb_dim = [], sym = Vec[ Op ](), interpolation_base = "lagrange", symm = false ) when interpolation_type == "nodal"
+        if nb_dim.size == 0
+            vec := Vec[ Op, nb_nodes ]()
+            for i in 0 .. vec.size
+                s := Op()
+                if name.type != String
+                    s = name( i )
+                else
+                    s = symbol("$name_node($(node_numbers_to_node_numbers_in_parent_cpp[i]))->$name","$name^{N$(node_numbers_to_node_numbers_in_parent_cpp[i])}") # $name_node.ind[$i].index
+                sym.push_back( s )
+                vec[i] = s
+            # info vec
+            return pe.interpolation( var_inter, vec, interpolation_base )
+        if nb_dim.size == 1
+            d := nb_dim[0]
+            vec := Vec[ Vec[ Op, d ], nb_nodes ]()
+            for i in 0 .. nb_nodes
+                for j in 0 .. d
+                    s := Op()
+                    s = symbol("$name_node($(node_numbers_to_node_numbers_in_parent_cpp[i]))->$name[$j]","$name^{N$(node_numbers_to_node_numbers_in_parent_cpp[i])}_{$j}") # $name_node.ind[$i].index
+                    sym.push_back( s )
+                    vec[i][j] = s
+            return Vec[ Op, d ]( pe.interpolation( var_inter, vec, interpolation_base ) )
+        if nb_dim.size == 2
+            TR := [ Mat[ Op, Gen[ nb_dim[0], nb_dim[1] ] ], Mat[ Op, Sym[ nb_dim[0] ] ] ][ symm ]
+            mat := Vec[ TR, nb_nodes ]()
+            for i in 0 .. nb_nodes
+                for j in 0 .. nb_dim[0]
+                    for k in 0 .. nb_dim[1]
+                        if symm and k > j
+                            continue
+                        s := Op()
+                        s = symbol("$name_node($(node_numbers_to_node_numbers_in_parent_cpp[i]))->$name($j,$k)","$name^{N$(node_numbers_to_node_numbers_in_parent_cpp[i])}_{$j,$k}") # $name_node.ind[$i].index
+                        sym.push_back( s )
+                        mat[i][j,k] = s
+                if symm
+                    for j in 0 .. nb_dim[0]
+                        for k in j+1 .. nb_dim[1]
+                            mat[i][j,k] = mat[i][k,j]
+            return TR( pe.interpolation( var_inter, mat, interpolation_base ) )
+        assert( 0, "TODO" )
+    
+    # helper function -> give a new "field" based on "canonical" interpolation
+    def new_variable( name, interpolation_type, deg, nb_dim = [], sym = Vec[ Op ](), interpolation_base = "lagrange", symm = false ) when interpolation_type == "enriched_nodal"
+        nb_points := generic_points(deg).size
+        if nb_dim.size == 0
+            vec := Vec[ Op, nb_points ]()
+            for i in 0 .. vec.size
+                s := Op()
+                if name.type != String
+                    s = name( i )
+                else
+                    s = symbol("$name_node($i))->$name","$name^{N$(i)}") # $name_node.ind[$i].index
+                sym.push_back( s )
+                vec[i] = s
+            # info vec
+            return pe.generic_interpolation( var_inter, vec, interpolation_base, deg )
+        if nb_dim.size == 1
+            d := nb_dim[0]
+            vec := Vec[ Vec[ Op, d ], nb_points ]()
+            for i in 0 .. nb_points
+                for j in 0 .. d
+                    s := Op()
+                    s = symbol("$name_node($(i))->$name[$j]","$name^{N$(i)}_{$j}") # $name_node.ind[$i].index
+                    sym.push_back( s )
+                    vec[i][j] = s
+            return Vec[ Op, d ]( pe.generic_interpolation( var_inter, vec, interpolation_base, deg ) )
+        if nb_dim.size == 2
+            TR := [ Mat[ Op, Gen[ nb_dim[0], nb_dim[1] ] ], Mat[ Op, Sym[ nb_dim[0] ] ] ][ symm ]
+            mat := Vec[ TR, nb_points ]()
+            for i in 0 .. nb_points
+                for j in 0 .. nb_dim[0]
+                    for k in 0 .. nb_dim[1]
+                        if symm and k > j
+                            continue
+                        s := Op()
+                        s = symbol("$name_node($(i))->$name($j,$k)","$name^{N$(i)}_{$j,$k}") # $name_node.ind[$i].index
+                        sym.push_back( s )
+                        mat[i][j,k] = s
+                if symm
+                    for j in 0 .. nb_dim[0]
+                        for k in j+1 .. nb_dim[1]
+                            mat[i][j,k] = mat[i][k,j]
+            return TR( pe.generic_interpolation( var_inter, mat, interpolation_base, deg ) )
+        assert( 0, "TODO" )
+    
+    # helper function -> give a new "field" based on "canonical" interpolation
+    def new_variable( name, interpolation_type, nb_dim = [], sym = Vec[ Op ](), symm = false ) when interpolation_type == "vertex_nodal"
+        nb_vertex_nodes := 0
+        for i in 0.. nb_nodes
+            if node_number_is_a_vertex( i )
+                nb_vertex_nodes++
+        if nb_dim.size == 0
+            vec := Vec[ Op, nb_vertex_nodes ]()
+            l := 0
+            for i in 0 .. nb_nodes
+                if node_number_is_a_vertex( i )
+                    s := Op()
+                    if name.type != String
+                        s = name( i )
+                    else
+                        s = symbol("$name_node($(node_numbers_to_node_numbers_in_parent_cpp[i]))->$name","$name^{N$(node_numbers_to_node_numbers_in_parent_cpp[i])}") # $name_node.ind[$i].index
+                    sym.push_back( s )
+                    vec[l] = s
+                    l++
+            return pe.interpolation_vertex( var_inter, vec )
+        if nb_dim.size == 1
+            d := nb_dim[0]
+            vec := Vec[ Vec[ Op, d ], nb_vertex_nodes ]()
+            l := 0
+            for i in 0 .. nb_nodes
+                if node_number_is_a_vertex( i )
+                    for j in 0 .. d
+                        s := Op()
+                        s = symbol("$name_node($(node_numbers_to_node_numbers_in_parent_cpp[i]))->$name[$j]","$name^{N$(node_numbers_to_node_numbers_in_parent_cpp[i])}_{$j}") # $name_node.ind[$i].index
+                        sym.push_back( s )
+                        vec[l][j] = s
+                    l++
+            return Vec[ Op, d ]( pe.interpolation_vertex( var_inter, vec ) )
+        if nb_dim.size == 2
+            TR := [ Mat[ Op, Gen[ nb_dim[0], nb_dim[1] ] ], Mat[ Op, Sym[ nb_dim[0] ] ] ][ symm ]
+            mat := Vec[ TR, nb_vertex_nodes ]()
+            l := 0
+            for i in 0 .. nb_nodes
+                if node_number_is_a_vertex( i )
+                    for j in 0 .. nb_dim[0]
+                        for k in 0 .. nb_dim[1]
+                            if symm and k > j
+                                continue
+                            s := Op()
+                            s = symbol("$name_node($(node_numbers_to_node_numbers_in_parent_cpp[i]))->$name($j,$k)","$name^{N$(node_numbers_to_node_numbers_in_parent_cpp[i])}_{$j,$k}") # $name_node.ind[$i].index
+                            sym.push_back( s )
+                            mat[l][j,k] = s
+                    if symm
+                        for j in 0 .. nb_dim[0]
+                            for k in j+1 .. nb_dim[1]
+                                mat[l][j,k] = mat[l][k,j]
+                    l++
+            return TR( pe.interpolation_vertex( var_inter, mat ) )
+        assert( 0, "TODO" )
+    
+    # helper function -> give a new "field" based on "canonical" interpolation
+    def new_variable( name, interpolation_type, nb_dim = [], sym = Vec[ Op ](), symm = false ) when interpolation_type in [ "global", "elementary" ]
+        bn := [ name_elem, "f" ][ interpolation_type == "global" ]
+        if nb_dim.size == 0
+            s := symbol("$bn.$name","$name")
+            sym.push_back( s )
+            return s
+        if nb_dim.size == 1
+            d := nb_dim[0]
+            res := Vec[ Op, d ]()
+            for j in 0 .. d
+                s := symbol("$bn.$name[$j]","$name{}_{$j}")
+                sym.push_back( s )
+                res[j] = s
+            return res
+        if nb_dim.size == 2
+            TR := [ Mat[ Op, Gen[ nb_dim[0], nb_dim[1] ] ], Mat[ Op, Sym[ nb_dim[0] ] ] ][ symm ]
+            mat := TR()
+            for j in 0 .. nb_dim[0]
+                for k in 0 .. nb_dim[1]
+                    if symm and k > j
+                        continue
+                    s := symbol("$bn.$name($j,$k)","$name{}_{$j,$k}")
+                    sym.push_back( s )
+                    mat[j,k] = s
+            return mat
+        assert( 0, "TODO" )
+    
+    # helper function -> give a new "field" based on "canonical" interpolation
+    def new_variable( name, interpolation_type, symbol_function, sym = Vec[ Op ]() ) when interpolation_type.ends_by( "_minus_1" )
+        wanted_interpolation := interpolation_type[ 0 .. interpolation_type.size - "_minus_1".size ]
+        sp := Vec[ Op ]()
+        tmp_interp := new_variable( "_tmp", interpolation_type = wanted_interpolation, sym = sp )
+        base := shape_functions_der( tmp_interp, sp )
+        #
+        res := Op( 0 )
+        for b, c in base, 0...
+            s := symbol_function( c )
+            sym.push_back( s )
+            res += b * s
+        return res
+    
+    #
+    def make_interpolation( res, interpolation_type, met_name, tex_name, interpolation_base = "lagrange" ) when interpolation_type == "nodal"
+        val_on_nodes := Vec[ type_of( res.val ), nb_nodes ]()
+        for num_node in 0 .. nb_nodes
+            for ind, val in indices_and_values_of( val_on_nodes[ num_node ] )
+                if ind.size
+                    j_ind := join( ind, "," )
+                    val = symbol( "$met_name[$(node_numbers_to_node_numbers_in_parent_cpp[num_node])]($j_ind)", "$(tex_name)_{$j_ind}^{$num_node}" )
+                else
+                    val = symbol( "$met_name[$(node_numbers_to_node_numbers_in_parent_cpp[num_node])]", "$(tex_name)^{$(node_numbers_to_node_numbers_in_parent_cpp[num_node])}" )
+                res.sym.push_back( val )
+        # interpolation
+        res.val = interpolation( val_on_nodes, interpolation_base )
+    
+    #
+    virtual def grad( tens )
+        assert( dim == nvi, "TODO : grad with nb_var_inter != dim ( $nvi != $dim )." )
+        #
+        inv_jac_  := get_inv_jac_mat()
+        res := Tensor[ Op, stat_vec(tens.sizes +++ [ dim ]) ]()
+        for ind, val in indices_and_values_of( tens )
+            dvi := Vec[ Op, nvi ]( function = val.diff( var_inter[_0] ) )
+            tmp := inv_jac_ * dvi # diff / ( X_0, X_1, X_2 ) in jac base
+            for d in 0 .. dim
+                res[ ind +++ [d] ] = tmp[ d ]
+        if tens.sizes.size == 0
+            return Vec[ Op ]( res.values )
+        return res
+    
+    #
+    virtual def grad_sym( tens ) when tens.tensor_order == 1
+        assert( tens.sizes.size==1, "grad_sym works only with tensor_order==1 as input." )
+        tmp := self.grad( tens )
+        res := Mat[ Op, Sym[Int32(tens.sizes[0])] ]()
+        for ind, val in res
+            val = ( tmp[ ind[0], ind[1] ] + tmp[ ind[1], ind[0] ] ) / 2
+        return res
+    
+    #
+    virtual def grad_asym( tens ) when tens.tensor_order == 1
+        assert( tens.sizes.size==1, "grad_asym works only with tensor_order==1 as input." )
+        tmp := self.grad( tens )
+        res := Mat[ Op ]( Int32(tens.sizes[0]), Int32(tens.sizes[0]) )
+        for ind, val in res
+            val = ( tmp[ ind[0], ind[1] ] - tmp[ ind[1], ind[0] ] ) / 2
+        return res
+    
+    #
+    virtual def div( tens ) when tens.tensor_order == 1
+        return sum( grad( tens ).diag )
+    
+    #
+    virtual def div( tens ) when tens.tensor_order == 2
+        assert( tens.sizes[0] == tens.sizes[1], "TODO -> put the right formulae for div( tens ) with $(tens.sizes[0]) != $(tens.sizes[1])." )
+        res := Vec[ Op, tens.sizes[0] ]()
+        mat := Mat[ Op ]( Int32(tens.sizes[0]), Int32(tens.sizes[0]) )
+        mat = tens
+        for i in 0 .. tens.sizes[0]
+            res[i] = div( mat.row( i ) )
+        return res
+    
+    #~
+        returns var_inter of self for a position p
+        meaning that p is a vector of size e.dim
+    ~#
+    virtual def var_inter_for_pos( p, nb_iterations = 1 )
+        d := p - pos
+        # if nvi == dim
+            # return Vec[ Op ]( newton_raphson_iteration( d, var_inter, get_center_of_var_inter(), assume_matrix_is_factorizable = true ) )
+        return Vec[ Op ]( newton_raphson_minimize_iteration_rec( dot( d, d ), var_inter, nb_iterations, get_center_of_var_inter() ) )
+    
+    #~
+        returns barycenter G such that integration( GM ) = 0 with GM = OM - OG = pos - G
+    ~#
+    def get_G( nb_iterations = 1 )
+        c := Vec[ Op, dim ]( function = x => symbol("coeff[$x]","C_{$x}") )
+        d := pos - c
+        degre_poly := dot( d, d ).poly_deg( var_inter )
+        if degre_poly < 0
+            degre_poly = 2 * max( get_order_interpolation() )
+        r := integration( dot( d, d ), order_diff = degre_poly )
+        return Vec[ Op ]( newton_raphson_minimize_iteration_rec( r, c, nb_iterations, pos.subs( var_inter, get_center_of_var_inter() ) ) )
+    
+    #~
+        returns a symbolic function = 1 if position p is inside self
+        meaning that p is a vector of size e.dim
+    ~#
+    virtual def point_is_inside( p, nb_iterations = 1, tolerance = 0, z_tolerance = 1e-2 )
+        vi := var_inter_for_pos( p, nb_iterations )
+        if nvi == dim
+            return var_inter_is_inside( vi, tolerance )
+        d := p - pos.subs( var_inter, vi )
+        return var_inter_is_inside( vi, tolerance ) * ( dot( d, d ) < z_tolerance ^ 2 * measure ^ ( 2 / nvi ) )
+    
+    #
+    virtual def var_inter_is_inside( vi, tolerance = 0 )
+        if TE::has_a_var_inter_is_inside_method
+            return TE::var_inter_is_inside( vi, tolerance )
+        # -> generic case (not optimized)
+        interval_var_inter := pe.interval_var_inter( vi ) 
+        res := Op( 1 )
+        for interval, var_inter in interval_var_inter, vi
+            res *= heaviside( tolerance + var_inter - interval[0] )
+            res *= heaviside( tolerance + interval[1] - var_inter )
+        return res
+    
+    #
+    virtual def extrusion_with_normals( normals, alpha )
+        return pos + alpha * interpolation( normals, "lagrange" )
+    
+    # 
+    virtual def var_inter_and_alpha_with_normals( normals, point, nb_iterations = 1 )
+        alpha := symbol( "alpha" )
+        proj := extrusion_with_normals( normals, alpha )
+        d := point - proj
+        return newton_raphson_minimize_iteration_rec( dot(d,d), var_inter +++ [ alpha ], nb_iterations, old_values = get_center_of_var_inter() +++ [ 0 ] )
+    
+    #
+    virtual def projection_with_normals( normals, point, nb_iterations = 1 )
+        vi := var_inter_with_normals( normals, point, nb_iterations )
+        return extrusion_with_normals( normals, 0 ).subs( var_inter, vi[ 0 .. var_inter.size ] )
+    
+    # return shape functions (lagrange or hierarchical) for nb_nodes
+    virtual def get_shape_functions( interpolation_base = "lagrange" )
+        res := Vec[ Op, nb_nodes ]()
+        for i in 0 .. nb_nodes
+            val_on_nodes := Vec[ Op, nb_nodes ]( function = _0 == i )
+            res[ i ] = interpolation( val_on_nodes, interpolation_base )
+        return res
+    
+    # return shape functions (hierarchical) for nb_vertex_nodes
+    virtual def get_shape_functions_vertex
+        res := Vec[ Op, nb_vertex_nodes ]()
+        for i in 0 .. nb_vertex_nodes
+            val_on_vertex_nodes := Vec[ Op, nb_vertex_nodes ]( function = _0 == i )
+            res[ i ] = interpolation_vertex( val_on_vertex_nodes )
+        return res
+    
+    # return shape functions (lagrange or hierarchical) of degree deg from generic_points
+    virtual def get_generic_shape_functions( interpolation_base = "lagrange", deg = 1 )
+        res := Vec[ Op, generic_points(deg).size ]()
+        for i in 0 .. generic_points(deg).size
+            val_on_points := Vec[ Op, generic_points(deg).size ]( function = _0 == i )
+            res[ i ] = generic_interpolation( val_on_points, interpolation_base, deg )
+        return res
+    
+    # return a function != 0 if self and e may have a common area
+    def area_intersection( e, mul_by_jac = true )
+        return integration( e.point_is_inside( pos ), mul_by_jac )
+    
+    # return true if node number $node_number is a vertex in self
+    # Example : Bar_4 0 -- 2 -- 3 -- 1 return true true false false for respectively 0 1 2 3
+    virtual def node_number_is_a_vertex( node_number )
+        return TE::node_number_is_a_vertex( node_number )
+    
+    # return true if p is a vector of coordonates vertex in self
+    # Example : Bar_4 0 -- 2 -- 3 -- 1 return true false for respectively p = [ 0 ] and p = [ 0.5 ]
+    virtual def point_is_a_vertex( p )
+        return TE::point_is_a_vertex( p )
+    
+    # return true if p is a vector of coordonates on an edge of self
+    # Example : Quad_9 return true false for respectively p = [ 0, 0.5 ] and p = [ 0.5, 0.5 ]
+    #~
+            3    6    2
+            x----x----x
+            |         |
+            7x    x8   x5
+            |         |
+            x----x----x
+            0    4    1
+    ~#
+    virtual def point_is_on_edge( p )
+        return TE::point_is_on_edge( p )
+    
+    #
+    def corr_cpp( num_node )
+        return TE::corr_cpp( num_node )
+    
+    #
+    def get_vertex_node_numbers_to_node_numbers_in_parent_cpp
+        vertex_node_numbers_to_node_numbers_in_parent_cpp := Vec[ Int32 ]()
+        for i in 0 .. nb_nodes
+            if node_number_is_a_vertex( i )
+                vertex_node_numbers_to_node_numbers_in_parent_cpp.push_back( node_numbers_to_node_numbers_in_parent_cpp[i] )
+        return vertex_node_numbers_to_node_numbers_in_parent_cpp
+    
+    #
+    def get_node_numbers_to_vertex_node_numbers
+        node_numbers_to_vertex_node_numbers := Vec[ Int32 ]()
+        cpt_vertex_nodes := 0
+        for i in 0 .. nb_nodes
+            node_numbers_to_vertex_node_numbers.push_back( cpt_vertex_nodes )
+            if node_number_is_a_vertex( i )
+                cpt_vertex_nodes++
+        return node_numbers_to_vertex_node_numbers
+    
+    # projection w of vector v (of size e.dim) over child_elem on shape functions such that w and v are in equilibrium over child_elem
+    def projection_on_shape_functions_with_equilibrium( v, order_integration, child_elem, interpolation_base = "lagrange" )
+        c := child_cast( child_elem )
+        v_child := projection_on_child_elem( v, c )
+        sym_w := Vec[ Op ]()
+        w := c->new_variable( "w",  interpolation_type = "nodal", nb_dim = [ dim ], sym = sym_w, interpolation_base = interpolation_base )
+        objective := Op( 0 )
+        for n in 0 .. c->nb_nodes
+            phi_n := c->get_shape_functions( interpolation_base )[ n ]
+            for d in 0 .. dim
+                order := ( phi_n * ( w[ d ] - v_child[ d ] ) ).poly_deg( c->var_inter )
+                order_ := ( phi_n * w[ d ] ).poly_deg( c->var_inter )
+                if order < 0
+                    order = max( order_, order_integration )
+                objective += ( c->gauss_num_integration( phi_n * ( w[ d ] - v_child[ d ] ), order_diff = order ) ) ^ 2
+        sym_sol := newton_raphson_minimize_iteration( objective, sym_w )
+        res := w.subs( sym_w, sym_sol )
+        return res
+    
+    # projection on canonical base of degree deg
+    def projection_on_canonical_base( expr, order_expr, deg )
+        base := Vec[ Op ]()
+        for order in 0 .. (deg+1)
+            for comb in ConstantSumList( sum = order, list_size = nvi )
+                base.push_back( product( var_inter ^ comb ) )
+        c := Vec[ Op, base.size ]( function = x => symbol("coeff[$x]","C_{$x}") )
+        pol := dot( c, base )
+        order_poly := pol.poly_deg( var_inter )
+        order := ( ( expr - pol ) ^ 2 ).poly_deg( var_inter )
+        if order < 0
+            order = 2 * max( order_expr, order_poly )
+        r := gauss_num_integration( ( expr - pol ) ^ 2, mul_by_jac = false, order_diff = order )
+        res := dot( newton_raphson_minimize_iteration( r, c ), base )
+        return res
+    
+    # projection on lagrange or hierarchical shape functions
+    def projection_on_shape_functions( expr, order_expr, interpolation_base = "lagrange" )
+        c := Vec[ Op, nb_nodes ]( function = x => symbol("coeff[$x]","C_{$x}") )
+        pol := dot( c, get_shape_functions( interpolation_base ) )
+        order_poly := pol.poly_deg( var_inter )
+        order := ( ( expr - pol ) ^ 2 ).poly_deg( var_inter )
+        if order < 0
+            order = 2 * max( order_expr, order_poly )
+        r := gauss_num_integration( ( expr - pol ) ^ 2, mul_by_jac = false, order_diff = order )
+        res := dot( newton_raphson_minimize_iteration( r, c ), get_shape_functions( interpolation_base ) )
+        return res
+    
+    # projection on hierarchical vertex shape functions
+    def projection_on_vertex_shape_functions( expr, order_expr )
+        c := Vec[ Op, nb_vertex_nodes ]( function = x => symbol("coeff[$x]","C_{$x}") )
+        pol := dot( c, shape_functions_vertex )
+        order_poly := pol.poly_deg( var_inter )
+        order := ( ( expr - pol ) ^ 2 ).poly_deg( var_inter )
+        if order < 0
+            order = 2 * max( order_expr, order_poly )
+        r := gauss_num_integration( ( expr - pol ) ^ 2, mul_by_jac = false, order_diff = order )
+        res := dot( newton_raphson_minimize_iteration( r, c ), shape_functions_vertex )
+        return res
+    
+    #
+    def construct_lagrange_shape_functions_using_current_base_( nb_nodes, pos_nodes, var_inter, shape_functions, base )
+        if not var_inter.size
+            return true
+        sum_objective := Op( 0 )
+        bs := base.size
+        for n in 0 .. nb_nodes
+            shape_coeffs := Vec[ Op, bs ]( function = symbol("coeff[$n,$_0]","C_{$n,$_0}") )
+            shape_function := dot( shape_coeffs, base )
+            objective := Op( 0 )
+            for m in 0 .. nb_nodes
+                objective += ( shape_function.subs( var_inter, pos_nodes[ m ] ) - (n==m) ) ^ 2
+            sol := newton_raphson_minimize_iteration( objective, shape_coeffs )
+            shape_function = shape_function.subs( shape_coeffs, sol )
+            sum_objective += abs( objective.subs( shape_coeffs, sol ) )
+            shape_functions[ n ] = shape_function
+        return assumed( sum_objective < 1e-6 )
+    
+    #
+    def construct_hierarchical_shape_functions_using_current_base_( nb_nodes, pos_nodes, var_inter, shape_functions, base )
+        if not var_inter.size
+            return true
+        sum_objective := Op( 0 )
+        bs := base.size
+        for n in 0 .. nb_nodes
+            shape_coeffs := Vec[ Op, bs ]( function = symbol("coeff[$n,$_0]","C_{$n,$_0}") )
+            shape_function := dot( shape_coeffs, base )
+            objective := Op( 0 )
+            if point_is_a_vertex( pos_nodes[ n ] )
+                for m in 0 .. nb_nodes
+                    if point_is_a_vertex( pos_nodes[ m ] )
+                        objective += ( shape_function.subs( var_inter, pos_nodes[ m ] ) - (n==m) ) ^ 2
+            else 
+                if point_is_on_edge( pos_nodes[ n ] )
+                    for m in 0 .. nb_nodes
+                        if point_is_on_edge( pos_nodes[ m ] )
+                            objective += ( shape_function.subs( var_inter, pos_nodes[ m ] ) - (n==m) ) ^ 2
+                else
+                    for m in 0 .. nb_nodes
+                        objective += ( shape_function.subs( var_inter, pos_nodes[ m ] ) - (n==m) ) ^ 2
+            sol := newton_raphson_minimize_iteration( objective, shape_coeffs )
+            shape_function = shape_function.subs( shape_coeffs, sol )
+            sum_objective += abs( objective.subs( shape_coeffs, sol ) )
+            shape_functions[ n ] = shape_function
+        return assumed( sum_objective < 1e-6 )
+        

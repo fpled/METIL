@@ -1,0 +1,17 @@
+__wait_for_display_windows__()
+
+catch object_associated_with_exception
+    TERM := getenv("TERM")
+    display_escape_sequences := ( TERM != "" and TERM != "dumb" )
+    if display_escape_sequences
+        stderr << "\027[1m"
+    stderr << "Error:Unmanaged exception: " << object_associated_with_exception
+    if display_escape_sequences
+        stderr << "\027[0m"
+    stderr << "\n"
+    stack_info()
+    set_thread_return_value( 1 )
+    
+stdout.destroy()
+stderr.destroy()
+stdin .destroy()

@@ -1,0 +1,62 @@
+#~
+== Projector ==
+*data : 
+** operator $A$
+** constraint $C$
+* two cases (bool C_is_kernel)
+** $\ker(P) = C \, \Rightarrow  \, P = I - C (C^T A C)^(-1) C^T A$
+** $\ker(P) = AC \, \Rightarrow \, P = I - A C (C^T A C)^(-1) C^T$
+* this algebraic operator can be transposed
+~#
+
+class Projector[ T, TOp, C_is_kernel, TVECLIST = MatVecList[T] ]
+    property is_a_projector
+    C := TVECLIST()
+    coarse_matrix := InternalVariable() # Mat[T, [Gen,Sym][TOp::is_sym] ]()
+    AC := TVECLIST()
+    A := InternalVariable()
+    #
+    def init( oper, constraint )
+        init_using_default_values( self )
+        A.init_using_var( oper )
+        C.init(constraint)
+        if C.nb_cols != 0
+            if C_is_kernel
+                AC.init(@A' * C)
+                coarse_matrix.init_using_var(inv(Mat[T, [Gen,Sym][TOp::is_sym] ]( AC' * C )))
+            else
+                AC.init(@A * C)
+                coarse_matrix.init_using_var(inv(Mat[T, [Gen,Sym][TOp::is_sym] ]( C' * AC )))
+    #
+    def mul( b )
+        if C.nb_cols == 0
+            return b
+        else
+            if C_is_kernel
+                return ( b - ( C * ( @coarse_matrix * ( AC' * b ) ) ) )
+            else
+                return ( b - ( AC * ( @coarse_matrix * ( C' * b ) ) ) )
+#
+class ProjectorTrans
+    property is_a_projector
+    p := InternalVariable()
+    def init(PP)
+        p.init_using_var(PP)
+    #
+    def mul(b)
+        if p->C.nb_cols == 0
+            return b
+        else
+            if p->C_is_kernel
+                return ( b - ( p->AC * ( @p->coarse_matrix' * ( p->C'* b ) ) ) )
+            else
+                return ( b - ( p->C * ( @p->coarse_matrix' * ( p->AC' * b) ) ) ) 
+
+#
+def trans(P) when P.is_a_projector
+    return ProjectorTrans(P)
+#
+def mul(a,b) when ( a.is_a_projector ) and b.tensor_order==1
+    return(a.mul(b))
+
+

@@ -1,0 +1,86 @@
+import "LazyCollection.met"
+import "LazySimpleScheduler.met"
+import "LazyComputerInfo.met"
+
+#~
+~#
+class LazyObjectAncestor
+    property is_a_LazyObject
+    # static active_lazy_collection := new LazyCollection()
+    static current_operation_id := Int64( 1 )
+    
+    sched_id        := 0 # id of scheduler which uses sched_info
+    sched_info      := UntypedPtr( NULL ) # pointer to extra data (!= for each scheduler...)
+    parents         := Vec[ Ptr[LazyObjectAncestor] ]() # used to look up for common paths
+    children        := Vec[ PtrWithCptUse[LazyObjectAncestor] ]()
+    cpt_use         := 0
+    times_used      := 0 # times it has been executed
+    is_a_lazy_leave := 0 # true if referenced in a lazy leave
+    
+    def init pertinence 0
+        init_lazy_obj()
+
+    virtual def nb_flop_estimation        pertinence 0  return 0
+    virtual def nb_inst_estimation        pertinence 0  return 0
+    virtual def nb_rw_estimation          pertinence 0  return 0
+    virtual def nb_hd_rw_estimation       pertinence 0  return 0
+    virtual def produced_data_estimation  pertinence 0  return 0
+    virtual def nb_bytes_for_func         pertinence 0  return 0
+    
+    virtual def get_done                  pertinence 0  abstract
+    virtual def evaluate                  pertinence 0  abstract
+    virtual def free                      pertinence 0  pass
+    virtual def allocate                  pertinence 0  pass
+    virtual def simplify                  pertinence 0  pass
+    virtual def write_to_stream(s)        pertinence 0  abstract
+
+    virtual def timing_on( cpu )
+        return nb_flop_estimation() / cpu.flops + 
+               nb_inst_estimation() / cpu.ops +
+               nb_rw_estimation() / cpu.main_memory->read_rate
+
+    virtual def init_lazy_obj
+        init_using_default_values( self )
+        # active_lazy_collection->register( &self )
+
+    virtual def destroy
+        # active_lazy_collection->remove( &self )
+        # if is_a_lazy_leave
+            # LazyLeaves[ true_type( self ) ]::remove( &self )
+        for c in children
+            i := c->parents.index_of_first_item_equal_to( Ptr[LazyObjectAncestor]( &self ), -1 )
+            assert( i >= 0, "Weird : parent and children lists are non-concordant ($(true_type(self))) (have you used children.push_back instead of add_child ?)" )
+            c->parents.remove_unordered( i )
+        free()
+        destroy_instanciated_attributes( self )
+
+    def add_child( ch )
+        children.push_back( ch )
+        ch->parents.push_back( &self )
+
+# @see new_lazy_leave( T, varargs )
+class LazyLeaves[ T ]
+    static friends := Vec[ Ptr[ T ] ]()
+
+    def register( p )
+        friends.push_back( p )
+    
+    def remove( p )
+        i := friends.index_of_first_item_equal_to( Ptr[T]( p ), -1 )
+        assert( i >= 0, "Object of type $T has not been registered" )
+        friends.remove_unordered( i )
+
+#~
+    Look for a similar lazy obj. If not found, create new one.
+    Assume that t contains a method called "init_would_give_the_same_result"
+~#
+def new_lazy_leave( T, varargs )
+    # for l in LazyLeaves[ T ]::friends
+        # if call_with_return( l->init_would_give_the_same_result, varargs )
+            # return l
+    res := allocate( T )
+    call( res->init, varargs )
+    res->is_a_lazy_leave = true
+    # LazyLeaves[ T ]::register( res )
+    return res
+

@@ -1,0 +1,87 @@
+class LazyComputerInfo    
+    #~ a network link ~#
+    class Network
+        def rw_rate_between( cpu_0, cpu_1 )
+            if cpu_0.name == cpu_1.name
+                return 0
+            return rw_rate
+        def latency_between( cpu_0, cpu_1 )
+            if cpu_0.name == cpu_1.name
+                return 0
+            return latency
+        def transfer_time_of( cpu_0, cpu_1, lazy_object )
+            return latency_between( cpu_0, cpu_1 ) + rw_rate_between( cpu_0, cpu_1 ) * lazy_object->produced_data_estimation
+        latency := Float64( 0 ) # s
+        rw_rate := Float64( 1e9 / 8 ) # Bytes/s
+        ext_data := UntypedPtr() # @see LazyScheduling
+    
+    #~ external memory ( hard disk, flash disk... ) that can be used for temporary storage ~#
+    class ExternalMemory
+        read_rate     := Float64( 140e6 ) # Bytes/s
+        write_rate    := Float64( 100e6 ) # Bytes/s
+        amount        := Float64( 200e9 ) # Bytes
+        attached_cpus := SplittedVec[ Ptr[LazyComputerInfo::Cpu], 8 ]()
+        used          := Float64( 0 ) # Bytes
+        ext_data      := UntypedPtr() # may be used by schedulers
+    
+    #~  ~#
+    class MainMemory
+        read_rate     := Float64( 6.4e9 ) # Bytes/s 6.4e9
+        write_rate    := Float64( 6.4e9 ) # Bytes/s 6.4e9
+        amount        := Float64( 2e9   ) # Bytes
+        attached_cpus := SplittedVec[ Ptr[LazyComputerInfo::Cpu], 8 ]()
+        used          := Float64( 0 ) # Bytes
+        ext_data      := UntypedPtr() # may be used by schedulers
+    
+    #~  ~#
+    class Cpu
+        name          := "localhost"
+        cpu_nb        := 0 # id
+        flops         := Float64( 10e9 )
+        ops           := Float64( 4e9 )
+        is_a_gpu      := false
+        main_memory   := Ptr[ LazyComputerInfo::MainMemory ]()
+        ext_memories  := Vec[ Ptr[ LazyComputerInfo::ExternalMemory ] ]()
+        ext_data      := UntypedPtr() # may be used by schedulers
+        # semaphore     := Semaphore()
+        
+        #
+        def write_to_stream( stream )
+            stream << name << "[$cpu_nb]"
+
+#~  ~#
+class LazyComputerPool
+    networks      := SplittedVec[ LazyComputerInfo::Network       , 8 ]()
+    ext_memories  := SplittedVec[ LazyComputerInfo::ExternalMemory, 8 ]()
+    main_memories := SplittedVec[ LazyComputerInfo::MainMemory    , 8 ]()
+    cpus          := SplittedVec[ LazyComputerInfo::Cpu           , 8 ]() # one entry for each cpu in each computer
+        
+    def init( nb_cpus ) when nb_cpus.is_a_number
+        init_using_default_values( self )
+        networks     .push_back()
+        ext_memories .push_back()
+        main_memories.push_back()
+        for i in 0 .. nb_cpus
+            n_cpu := cpus.push_back()
+            n_cpu->cpu_nb = i
+            n_cpu->main_memory  = main_memories.begin
+            n_cpu->main_memory->attached_cpus.push_back( n_cpu )
+            n_cpu->ext_memories = [ ext_memories.begin ]
+            for e in n_cpu->ext_memories
+                e->attached_cpus.push_back( n_cpu )
+        #
+        update_cpu_nb()
+            
+    def update_cpu_nb
+        for c, cpt in cpus, 0...
+            c.cpu_nb = cpt
+    
+    def time_to_get_data( cpu, args, func )
+        # TODO -> network contention
+        res := Float64( 0 )
+        for a in args
+            tmp := Float64::max_representable
+            for n in networks
+                tmp = min( tmp, n.get_transfer_time( cpu, @a->cpu, a ) )
+            res = max( res, a->finishing_time + tmp )
+        return res

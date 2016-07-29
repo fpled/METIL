@@ -1,0 +1,3 @@
+
+a := 1+2
+assert( a == 3, "basic int arithmetic" )

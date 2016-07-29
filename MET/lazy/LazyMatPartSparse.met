@@ -1,0 +1,969 @@
+# @see LazyMat[ T, ST ]
+
+
+
+#~
+~#
+class LazyMatPartSparse[ T, ST, br, bc, nr, nc ] inherits LazyMatPart[ ST ]
+    property is_a_LazyMatPartSparse
+    static simd_size := default_simd_size( T )
+    static const RD := LazyMatPartSparseRowData[ T, ST, br, bc, nr, nc, simd_size ]
+    static const nb_row_per_block := br * nr
+    static const nb_col_per_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    if nb_row_per_block * nb_col_per_block < simd_size
+        simd_size = 1
+    
+    data := Ptr[ RD ]( NULL ) # row_data
+    density_ := Float64( 12 ) # ~ nb blocks per line
+
+    virtual def get_density
+        return density_
+
+    virtual def reassign_density( val )
+        density_ = val
+
+    def get_data_size_estimation
+        return nb_rows * nb_col_per_block * density
+    
+    virtual def select( i, j )
+        # if not data
+            # ls := LazySimpleScheduler( [ &self ] ); ls.execute()
+        r := i // nb_row_per_block
+        #info data
+        return data[ r ].select( i % nb_row_per_block, j )
+        
+    virtual def allocate
+        assert( not data, "?" )
+        br := ( nb_rows + nb_row_per_block - 1 ) // nb_row_per_block
+        data = malloc( RD.byte_size * br )
+        for r in 0 .. br
+            data[r].init()
+    
+    virtual def free
+        if false and data
+            # print "FREE ", self
+            # for c in children
+                # info @c
+            br := ( nb_rows + nb_row_per_block - 1 ) // nb_row_per_block
+            for r in ( 0 .. br ).reversed
+                data[r].destroy()
+            data.free()
+            data = NULL
+            
+    virtual def get_done
+        return Bool( data )
+
+    virtual def mul_vec( vec_sub_part, offset_mat_col, offset_vec, cs, NST )
+        return new_LazyMatPartSparseMulVecPart( &self, vec_sub_part, 0, offset_mat_col, offset_vec, cs, NST )
+    
+    virtual def get_ScalarType
+        return T
+        
+    virtual def diag_extraction( beg_row, beg_col, size )
+        res := new LazyMatPartSparseDiagExtraction[ type_of( self ) ]()
+        res->beg_row = beg_row
+        res->beg_col = beg_col
+        res->size    = size
+        res->add_child( &self )
+        return res
+
+    virtual def chol( incomp )
+        #
+        for p in parents
+            if p->is_a_LazyMatPartSparse and UntypedPtr( p->children[0] ) == UntypedPtr( &self )
+                return child_cast( p )
+        #
+        res := new LazyMatPartSparseChol[ T, ST, br, bc, nr, nc, simd_size, incomp ]
+        res->nb_rows = nb_rows; res->nb_cols = nb_cols
+        res->add_child( &self )
+        # res->density = density * Float64( nb_rows ) ^ 0.63
+        return res
+        
+    virtual def solve_tri( sub_vec, mat_offset, vec_offset, inf )
+        assert( mat_offset == 0, "TODO -> ..." )
+        TR := type_promote( partial_instanciation T, partial_instanciation sub_vec->get_ScalarType(), mul )
+        res := new LazyVecPartSparseSolveTri[ TR, T, sub_vec->get_ScalarType(),  ST, br, bc, nr, nc, simd_size, inf ]()
+        res->size = nb_rows
+        res->mat_offset = mat_offset
+        res->vec_offset = vec_offset
+        res->add_child( &self )
+        res->add_child( sub_vec )
+        return res
+
+# -----------------------------------------------------²-------------------------------------------------------
+
+#
+class LazyMatPartSparseRowDataIndexCalculator[ bit_field, br, bc, nr, nc, simd_size ]
+    static nz := Mat[ Int32, Gen[ br * nr, bc * nc ] ]()
+    for ind, val in nz
+        rb := ind[0] // br
+        cb := ind[1] // bc
+        val = 2 * ( and_bitwise( bit_field, 2 ^ ( rb * nc + cb ) ) != 0 )
+    #
+    static ind := Mat[ Int32, Gen[ br * nr, bc * nc ] ]( default_value = -666 )
+    # try to put aligned data
+    static cpt := 0
+    for r in 0 .. br * nr
+        for c in range( begin = 0, increment = simd_size, end = bc * nc - simd_size + 1 )
+            if all( nz.row( r )[ c .. c + simd_size ] )
+                for i in 0 .. simd_size
+                    ind[ r, c + i ] = cpt++
+                    nz [ r, c + i ] = 1
+    # complete by non aligned data ( row ordered )
+    for c in 0 .. bc * nc
+        for r in 0 .. br * nr
+            if nz[ r, c ] == 2
+                ind[ r, c ] = cpt++
+                nz [ r, c ] = 1 
+    #
+    static size := ceil( cpt, simd_size )
+
+    static sorted_ind := Vec[ Vec[Int32,2] ]()
+    for i in 0 .. cpt
+        for ind, val in ind
+            if val == i
+                sorted_ind.push_back( ind )
+
+    #
+    def test
+        nr := 2; nc := 2
+        br := 3; bc := 3
+        simd_size := 2
+        for bit_field in 0 .. 2 ^ ( nr * nc )
+            lc := LazyMatPartSparseRowDataIndexCalculator[ bit_field, br, bc, nr, nc, simd_size ]()
+            info bit_field
+            infon lc.ind
+    
+
+
+#~
+    A row of blocks of size [ br * nc, bc * nr ]
+    if nr * nc == 1
+        indices[i] = column // br of beginning of data[i] where data[i] is a block br * bc like
+            [ T_0 T_1 T_6 ]
+            [ T_2 T_3 T_7 ]
+            [ T_4 T_5 T_8 ] if A_i==1, with T_i a scalar of type T
+    else
+        indices = [ column // ( br * nr ), offset_in_data, bit_field ] * nb_block_set where
+            column -> ...
+            data[ offset_in_data ] -> beginning of T data
+            bit_field -> sum_rc A_rc 2^i where A_rc == 1 if br*bc block contains non zero entries
+~#
+class LazyMatPartSparseRowData[ T, ST, br, bc, nr, nc, simd_size ]
+    class IndiceDataIfSeveralBlocks[ST]
+        col ~= ST # column
+        off ~= ST # offset_in_data
+        nze ~= ST # bit field for non zero entries
+    #
+    static const nb_row_per_block  := br * nr
+    static const nb_col_per_block  := bc * nc
+    static const T_alignement_byte := simd_size * T.byte_size
+    static const ID := [ ST, IndiceDataIfSeveralBlocks[ST] ][ nr * nc > 1 ] # indice data
+    static const default_lc := LazyMatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+    static const default_block_size := default_lc.size
+    static const default_value := T( 0 )
+    
+    data    := Vec[ T, -1, ST, T_alignement_byte ]()
+    indices := Vec[ ID, -1, ST ]()
+
+    def select( r, c )
+        re := MatcSparseDelayedAccess[ ST ]( self, r, c )
+        return re.var
+        
+    # returned by select()
+    class MatcSparseDelayedAccess[ ST ]
+        vs := InternalVariable()
+        i := ST(0)
+        j := ST(0)
+        
+        def init( v, r, c )
+            vs.init_using_var( v )
+            i.init( r )
+            j.init( c )
+            
+        def get_var
+            cj := j // vs->nb_col_per_block
+            oj := j %  vs->nb_col_per_block
+            cj *= vs->nb_col_per_block
+            if vs->nr * vs->nc == 1
+                for cpt in 0 .. vs->indices.size
+                    if vs->indices[ cpt ] >= cj
+                        if vs->indices[ cpt ] == cj
+                            return vs->data[ cpt * vs->default_lc.size + vs->default_lc.ind[ i, oj ] ]
+                        return vs->default_value
+            else
+                for ind in vs->indices
+                    if ind.col >= cj
+                        if ind.col == cj
+                            lc := LazyMatPartSparseRowDataIndexCalculator[ ind.nze, br, bc, nr, nc, simd_size ]()
+                            if lc.nz[ i, oj ]
+                                return vs->data[ ind.off + lc.ind[ i, oj ] ]
+                        return vs->default_value
+            return vs->default_value
+            
+        def reassign_var( v )
+            b := vs->block( j )
+            b[ i, j % vs->nb_row_per_block ] = v
+        
+        def init_var( v )
+            reassign_var( v )
+    
+    #
+    class Block[ T, bit_field, br, bc, nr, nc, simd_size ]
+        static lc := LazyMatPartSparseRowDataIndexCalculator[ bit_field, br, bc, nr, nc, simd_size ]()
+        
+        data ~= Ptr[T]
+        
+        def reassign( v ) when v.tensor_order <= 0
+            for i in 0 .. lc.size
+                data[ i ] = v
+        
+        def select( r, c )
+            if lc.nz[ r, c ]
+                return data[ lc.ind[ r, c ] ]
+            return T( 0 )
+            
+        def __for__( block )
+            for r in 0 .. br * nr
+                for c in 0 .. bc * nc
+                    if lc.nz[ r, c ]
+                        block( ( [r,c], data[ lc.ind[ r, c ] ] ) )
+                    else
+                        block( ( [r,c], T(0) ) )
+                        
+    #
+    def block( j )
+        cj := j // nb_col_per_block
+        cj *= nb_col_per_block
+        if nr * nc == 1
+            for cpt in 0 .. indices.size
+                if indices[ cpt ] >= cj
+                    if indices[ cpt ] == cj
+                        lc := LazyMatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+                        return Block[ T, 0, br, bc, nr, nc, simd_size ]( data = &data[ cpt * default_block_size ] )
+                    @indices.new_elem_at_position( cpt ) = cj
+                    res := data.make_room_to_insert( cpt * default_block_size, default_block_size )
+                    for i in 0 .. default_block_size
+                        res[ i ] = 0
+                    return Block[ T, 0, br, bc, nr, nc, simd_size ]( data = res )
+            return push_block( j, 1 )
+        else
+            for ind in indices
+                if ind.col >= cj
+                    if ind.col == cj
+                        lc := LazyMatPartSparseRowDataIndexCalculator[ ind.nze, br, bc, nr, nc, simd_size ]()
+                        return Block[ T, bit_field, br, bc, nr, nc, simd_size ]( data = &data[ ind.off ] )
+                    assert( 0, "TODO" )
+            assert( 0, "TODO" )
+            return push_block( c, 1 )
+    
+    #
+    def push_block( col, bit_field )
+        assert( col % (bc*nc) == 0, "..." )
+        os  := data.size
+        res := Block[ T, bit_field, br, bc, nr, nc, simd_size ]()
+        if nr * nc == 1
+            indices.push_back( col )
+        else
+            indices.push_back( col = col, off = os, nze = bit_field )
+        data.resize( os + res.lc.size )
+        res.data = data.begin + os
+        return res
+    
+    #
+    def get_additional_cpp_methods
+        args := Vec[String]( [ "ST row, ST col" ] )
+        for r in 0 .. br
+            for c in 0 .. bc
+                args.push_back( "T v_$(r)_$(c)" )
+        res := ""
+        res <<< "    void add( $(join(args,", ") ) ) {"
+        assert( nr * nc == 1, "TODO" )
+        res <<< "        for(unsigned i=0;i<indices.size();++i) {"
+        res <<< "            if ( indices[i] >= col ) {"
+        res <<< "                if ( indices[i] == col ) {"
+        lc := LazyMatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+        res <<< "                    T *d = &data[ $( lc.size ) * i ];"
+        for r in 0 .. br
+            for c in 0 .. bc
+                res <<< "                    d[ $(lc.ind[ r, c ]) ] += v_$(r)_$(c);"
+        res <<< "                    return;"
+        res <<< "                }"
+        res <<< "                else { // creation"
+        res <<< "                    ST *ni = indices.make_room_to_insert( i, 1 ); *ni = col;"
+        res <<< "                    T *d = data.make_room_to_insert( $( lc.size ) * i, $( lc.size ) );"
+        for r in 0 .. br
+            for c in 0 .. bc
+                res <<< "                    d[ $(lc.ind[ r, c ]) ] = v_$(r)_$(c);"
+        res <<< "                    return;"
+        res <<< "                }"
+        res <<< "            }"
+        res <<< "        }"
+        res <<< "        *indices.new_elem() = col;"
+        res <<< "        ST os = data.size(); data.resize( os + $(lc.size) );"
+        for r in 0 .. br
+            for c in 0 .. bc
+                res <<< "        data[ os + $(lc.ind[ r, c ]) ] = v_$(r)_$(c);"
+        res <<< "    }"
+        
+        return res
+    
+# ------------------------------------------------------------------------------------------------------------------------------
+#~
+    Trial purpose -> fill a matrix with rand values
+~#
+class LazyMatPartSparseRand[ T, ST, br, bc, nr, nc ] inherits LazyMatPartSparse[ T, ST, br, bc, nr, nc ]
+    bf := 0
+    val_on_diag := T( 0 )
+    
+    def init( nb_rows, nb_cols, bit_field = 2 ^ (nr*nc)-1, val_on_diag = 0 )
+        init_lazy_obj()
+        self.nb_rows = nb_rows
+        self.nb_cols = nb_cols
+        bf = bit_field
+        self.val_on_diag = val_on_diag
+    
+    #
+    virtual def evaluate
+        R := br * nr
+        C := bc * nc
+        nb_row_blocks := ( nb_rows + R - 1 ) // R
+        nb_col_blocks := ( nb_cols + C - 1 ) // C
+        for r in 0 .. nb_row_blocks
+            big_row := ref data[ r ]
+            for c in 0 .. nb_col_blocks
+                b := big_row.push_block( c * ( bc * nc ), bf )
+                for ind, val in b
+                    val = ceil( randf() * 100 ) / 100 + (ind[0]==ind[1] and r==c) * val_on_diag
+
+    #
+    virtual def write_to_stream( stream )
+        stream << "Mat(Rand)"
+    
+    virtual def nb_rw_estimation
+        return nb_rows * nb_cols * T.byte_size
+        
+# ------------------------------------------------------------------------------------------------------------------------------
+#~
+    RD -> RowData
+    T1 -> ScalarType for vec
+~#
+class LazyMatPartSparseMatVecCompiledFunction[ RD, T1, T, ST, br, bc, nr, nc ]
+    # static const br := RD::br; nr := RD::nr; bc := RD::bc; nc := RD::nc; 
+    static const simd_size := RD::simd_size
+    static const row_per_big_block := br * nr
+    static const col_per_big_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    static const dot_ind := ".col" * several_blocks
+        
+    def make_col_kern( stream, beg_row, end_row, beg_col, end_col )
+        stream <<< "            ST v_ind = m->indices[ni]$dot_ind;"
+        if several_blocks
+            stream <<< "            switch ( m->indices[ni].nze ) {"
+        for bf in 1 .. 2 ^ ( nr * nc )
+            if several_blocks
+                stream <<< "            case $bf:"
+            lc := LazyMatPartSparseRowDataIndexCalculator[ bf, br, bc, nr, nc, simd_size ]()
+            
+            if beg_col.size or end_col.size
+                for c in 0 .. col_per_big_block
+                    col_cond_list := Vec[String]()
+                    if beg_col.size  col_cond_list.push_back( "$c >= $beg_col" )
+                    if end_col.size  col_cond_list.push_back( "$c < $end_col" )
+                    col_cond := join( col_cond_list, " and " )
+                    if any( lc.nz.col( c ) )
+                        stream <<< "            if ( $col_cond ) {"
+                        for r in 0 .. row_per_big_block
+                            if lc.nz[ r, c ]
+                                if beg_row.size or end_row.size
+                                    row_cond_list := Vec[String]()
+                                    if beg_row.size  row_cond_list.push_back( "$r >= $beg_row" )
+                                    if end_row.size  row_cond_list.push_back( "$r < $end_row" )
+                                    row_cond := join( row_cond_list, " and " )
+                                    stream <<< "              if ( $row_cond )"
+                                stream <<< "                res_$r += d[$(lc.ind[r,c])]*v[v_ind+$c];"
+                    if any( lc.nz.col(c) )
+                        stream <<< "            }"
+            else
+                for r in 0 .. row_per_big_block
+                    ite := Vec[ String ]()
+                    for c in 0 .. col_per_big_block
+                        if lc.nz[ r, c ]
+                            ite.push_back( "d[$(lc.ind[r,c])]*v[v_ind+$c]" )
+                    if ite.size
+                        stream <<< "            res_$r += $(join(ite,"+"));"
+            
+            
+            stream <<< "            d += $( lc.size );"
+            if several_blocks
+                stream <<< "              break;"
+        if several_blocks
+            stream <<< "            }"
+    
+    
+    def make_mat_mult_vec_kern( stream, partial )
+        if partial
+            stream <<< "template<class T,class RD,class T1,class ST> inline void mat_mult_vec_kern_partial( T *&res, const RD *m, const T1 *v, ST beg_row, ST end_row, ST beg_col, ST end_col ) {"
+        else
+            stream <<< "template<class T,class RD,class T1,class ST> inline void mat_mult_vec_kern_full( T *&res, const RD *m, const T1 *v, ST beg_col, ST end_col ) {"
+        for i in 0 .. row_per_big_block
+            stream <<< "    T res_$i = 0;"
+        
+        # first col block that contains beg_col
+        stream <<< "    ST ni = 0;"
+        stream <<< "    while ( ni < m->indices.size() and m->indices[ni]$dot_ind + $col_per_big_block <= beg_col ) ++ni; " # first block must contain offset_mat_col or be after
+        if several_blocks
+            stream <<< "    T *d = m->data.data_ + m->indices[ni].off;"
+        else
+            lc := LazyMatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+            stream <<< "    T *d = m->data.data_ + $( lc.size ) * ni;"
+        # first block that won't be "fully" used -> end_ni-1
+        stream <<< "    ST end_ni = m->indices.size();"
+        stream <<< "    while ( end_ni and m->indices[end_ni-1]$dot_ind + $col_per_big_block > end_col ) --end_ni;"
+        # stream <<< "    std::cout << ni << ' ' << end_ni << ' ' << end_col << std::endl;"
+        
+        #
+        stream <<< "    if ( ni == end_ni ) {"
+        stream <<< "        if ( beg_col >= m->indices[ni]$dot_ind ) {"
+        stream <<< "            beg_col %= $col_per_big_block;"
+        stream <<< "            end_col %= $col_per_big_block;"
+        make_col_kern( stream, "beg_row"*partial, "end_row"*partial, "beg_col", "end_col" )
+        stream <<< "        }"
+        stream <<< "    }"
+        stream <<< "    else {"
+        stream <<< "        // beg block"
+        stream <<< "        if ( beg_col > m->indices[ni]$dot_ind ) {"
+        stream <<< "            beg_col %= $col_per_big_block;"
+        make_col_kern( stream, "beg_row"*partial, "end_row"*partial, "beg_col", "" )
+        stream <<< "            ++ni;"
+        stream <<< "        }"
+        stream <<< "        // mid blocks"
+        stream <<< "        for ( ; ni < end_ni; ni++ ) {"
+        make_col_kern( stream, "beg_row"*partial, "end_row"*partial, "", "" )
+        stream <<< "        }"
+        stream <<< "        // end block"
+        stream <<< "        if ( ni < m->indices.size() and m->indices[ni]$dot_ind + $col_per_big_block > end_col ) {"
+        stream <<< "            end_col %= $col_per_big_block;"
+        make_col_kern( stream, "beg_row"*partial, "end_row"*partial, "", "end_col" )
+        stream <<< "        }"
+        stream <<< "    }"
+        
+        #
+        for i in 0 .. row_per_big_block
+            if partial
+                stream << "    if ( $i >= beg_row and $i < end_row )"
+            stream <<< "    *(res++) = res_$i;"
+        stream <<< "}"
+        
+    
+    def get_src( stream ) 
+        stream <<< "#include <iostream>"
+        make_mat_mult_vec_kern( stream, false )
+        make_mat_mult_vec_kern( stream, true  )
+        #
+        stream <<< "template<class T,class RD,class T1,class ST> void mat_mult_vec( T *res, const RD *m, const T1 *v, ST beg_row, ST end_row, ST beg_col, ST end_col ) {"
+        stream <<< "    ST nb_big_row_to_skip = beg_row / $row_per_big_block;"
+        stream <<< "    ST nb_row_to_skip = nb_big_row_to_skip * $row_per_big_block;"
+        stream <<< "    m += nb_big_row_to_skip;"
+        stream <<< "    beg_row -= nb_row_to_skip;"
+        stream <<< "    end_row -= nb_row_to_skip;"
+        stream <<< "    // beg blocks"
+        stream <<< "    if ( beg_row ) {" # beg_row in [ 0, row_per_big_block [
+        stream <<< "        mat_mult_vec_kern_partial( res, m, v, beg_row, $row_per_big_block, beg_col, end_col );"
+        stream <<< "        m++; end_row -= $row_per_big_block - beg_row;"
+        stream <<< "    }"
+        stream <<< "    // main loop"
+        stream <<< "    while ( end_row >= $row_per_big_block ) {"
+        stream <<< "        mat_mult_vec_kern_full( res, m, v, beg_col, end_col );"
+        stream <<< "        m++; end_row -= $row_per_big_block;"
+        stream <<< "    }"
+        stream <<< "    // nb remaining rows < row_per_big_block"
+        stream <<< "    if ( end_row )"
+        stream <<< "        mat_mult_vec_kern_partial( res, m, v, 0, end_row, beg_col, end_col );"
+        stream <<< "}"
+
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "mat_mult_vec", [ Ptr[T], Ptr[RD], Ptr[T1], ST, ST, ST, ST ] )
+        ]
+    def get_control_sum
+        return 50
+
+# ------------------------------------------------------------------------------------------------------------
+
+# M should be a SparsePart, and TV and VecPart
+class LazyMatPartSparseMulVecPart[ TM, VecScalarType, T, ST ] inherits LazyVecPart[ T, ST ]
+    static const func := CppCompiledFunctionSet[ LazyMatPartSparseMatVecCompiledFunction[ TM::RD, VecScalarType, T, ST, TM::br, TM::bc, TM::nr, TM::nc ] ]::get_func("mat_mult_vec")
+
+    offset_mat_row  := ST( 0 )
+    offset_mat_col  := ST( 0 )
+    offset_vec      := ST( 0 )
+    common_size     := ST( 0 )
+    
+    virtual def evaluate
+        M := child_cast( children[0] )
+        V := child_cast( children[1] )
+        exec_ccode_function( func, data, M->data, V->data + offset_vec - offset_mat_col, offset_mat_row, offset_mat_row + size, offset_mat_col, offset_mat_col + common_size )
+        # for i in 0 .. size
+            # res := T( 0 )
+            # for c in 0 .. common_size
+                # res += M->select( i, c + offset_mat ) * V->select( c + offset_vec )
+            # data[ i ] = res
+    #
+    virtual def write_to_stream( stream )
+        stream << "Mat*Vec"
+    
+    virtual def nb_rw_estimation
+        M := child_cast( children[0] )
+        V := child_cast( children[1] )
+        return M->data_size_estimation + V->data_size_in_memory()
+    
+    virtual def nb_flop_estimation
+        M := child_cast( children[0] )
+        return M->data_size_estimation
+    
+
+# ------------------------------------------------------------------------------------------------------------
+
+#
+def new_LazyMatPartSparseMulVecPart( mat_sub_part, vec_sub_part, offset_mat_row, offset_mat_col, offset_vec, cs, NST )
+    # look for similar ..
+    # else
+    NT := type_promote( partial_instanciation mat_sub_part->get_ScalarType(), partial_instanciation vec_sub_part->get_ScalarType(), mul )
+    res := new LazyMatPartSparseMulVecPart[ mat_sub_part->type, vec_sub_part->get_ScalarType(), NT, NST ]
+    res->size = mat_sub_part->nb_rows
+    res->offset_mat_row = offset_mat_row
+    res->offset_mat_col = offset_mat_col
+    res->offset_vec = offset_vec
+    res->common_size = cs
+    res->add_child( mat_sub_part )
+    res->add_child( vec_sub_part )
+    return res
+
+
+# ------------------------------------------------------------------------------------------------------------
+
+#
+class LazyMatPartSparseDiagExtraction[ TM ] inherits LazyVecPart[ TM::T, TM::ST ]
+    static cpp_func ~= CppCompiledFunctionSet_
+    static const dot_ind := ".col" * TM::several_blocks
+    static const br := TM::br
+    static func := UntypedPtr( NULL )
+
+    beg_row ~= ST
+    beg_col ~= ST
+    
+    virtual def evaluate
+        if not func
+            cpp_func.init( self )
+            func = cpp_func[ "diag_extract" ]
+        M := child_cast( children[0] )
+        exec_ccode_function( func, data, M->data, beg_row, beg_col, size )
+        # for i in 0 .. size data[i] = 1
+    
+    virtual def write_to_stream( stream )
+        stream << "DiagMat"
+
+    def get_src( stream )
+        setz := ""
+        for r in 0 .. TM::nb_row_per_block
+            setz <<< "res[ r + $r ] = 0;\n                            "
+        
+        setwithr := ""
+        if TM::several_blocks
+            setwithr <<< "T *d = row.data.data_ + mat->indices[ni].off;\n                    "
+        else
+            lc := LazyMatPartSparseRowDataIndexCalculator[ 1, TM::br, TM::bc, TM::nr, TM::nc, TM::simd_size ]()
+            setwithr <<< "T *d = row.data.data_ + $( lc.size ) * ci;\n                    "
+        lc := LazyMatPartSparseRowDataIndexCalculator[ 1, TM::br, TM::bc, TM::nr, TM::nc, TM::simd_size ]()
+        for r in 0 .. TM::nb_row_per_block
+            setwithr <<< "res[ r + $r ] = d[ $(lc.ind[r,r]) ];\n                    "
+        
+        #
+        stream <<<<
+            #include <iostream>
+            #include <cmath>
+            #include <assert.h>
+            template<class T,class RD,class ST> void diag_extract( T *res, RD *mat, ST beg_row, ST beg_col, ST size ) {
+                assert( beg_row == 0 );
+                assert( beg_col == 0 );
+                for(ST r=0;r<size;r+=$br) {
+                    RD &row = mat[ r / $br ];
+                    for(ST ci=0;;++ci) {
+                        if ( ci == row.indices.size() ) {
+                            $setz
+                            break;
+                        }
+                        if ( row.indices[ci]$dot_ind >= r ) {
+                            if ( row.indices[ci]$dot_ind == r ) {
+            $setwithr
+                            }
+                            else {
+            $setz
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "diag_extract", [ Ptr[T], Ptr[ TM::RD ], ST, ST, ST ] )
+        ]
+    
+    def get_control_sum
+        return 100
+        
+    virtual def nb_rw_estimation
+        return data_size_in_memory()
+
+# ------------------------------------------------------------------------------------------------------------
+
+#~
+~#
+class LazyMatPartSparseChol[ T, ST, br, bc, nr, nc, simd_size, incomp ] inherits LazyMatPartSparse[ T, ST, br, bc, nr, nc ]
+    static const RD := LazyMatPartSparseRowData[ T, ST, br, bc, nr, nc, simd_size ]
+    static const nb_row_per_block := br * nr
+    static const nb_col_per_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    static const dot_ind := ".col" * several_blocks
+    
+    static func := UntypedPtr( NULL )
+    static cpp_func ~= CppCompiledFunctionSet_
+
+    virtual def nb_rw_estimation
+        return nb_rows * density * nb_col_per_block * T.byte_size
+    
+    virtual def nb_flop_estimation
+        return nb_rows * Float64( density ) ^ 1.5 * nb_col_per_block
+
+    virtual def evaluate
+        if not func
+            cpp_func.init( self )
+            func = cpp_func[ "chol" ]
+        M := child_cast( children[0] )
+        exec_ccode_function( func, data, M->data, nb_rows )
+        #
+        # ch := child_cast( children[ 0 ] )
+        # for i in 0 .. nb_rows // ( br * nr )
+            # info ch->data[i].data.size
+            # data[ i ] = ch->data[i]
+    
+    virtual def write_to_stream( stream )
+        stream << "Chol"
+
+    def get_src( stream )
+        assert( incomp, "TODO : not incomplete" )
+        assert( nr * nc == 1, "TODO : chol with several blocks" )
+        #
+        lc := LazyMatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+        init_reg := ""
+        for r in 0 .. nb_row_per_block
+            for c in 0 .. nb_col_per_block
+                init_reg << "T r_$(r)_$(c) = d[ $(lc.ind[ r, c ]) ];\n            "
+                
+        push_reg := ""
+        for ind in lc.sorted_ind
+            push_reg << "res_row.data.push_back( r_$(ind[0])_$(ind[1]) );\n            "
+        for ind in lc.cpt .. lc.size
+            push_reg << "res_row.data.push_back( 0 );\n            "
+            
+        finalize_diag_ref := ""
+        for r in 0 .. br
+            for c in 0 .. r + 1
+                v := Vec[String]( [ "r_$(r)_$(c)" ] )
+                for c2 in 0 .. c
+                    v.push_back( "r_$(c)_$(c2) * r_$(r)_$(c2)" )
+                if c == r
+                    finalize_diag_ref << "r_$(r)_$(c) = sqrt( $(join(v," - ")) );\n                "
+                else
+                    finalize_diag_ref << "r_$(r)_$(c) = ( $(join(v," - ")) ) / r_$(c)_$(c);\n                "
+                    
+        sub_reg := ""
+        for r in 0 .. br
+            for c in 0 .. bc
+                v := Vec[String]()
+                for c2 in 0 .. bc
+                    v.push_back( "dc[ $(lc.ind[c,c2]) ] * dr[ $(lc.ind[r,c2]) ]" )
+                sub_reg << "r_$(r)_$(c) -= $(join( v, " + " ));\n                        "
+                
+        finalize_extr := ""
+        for r in 0 .. br
+            for c in 0 .. bc
+                v := Vec[String]( [ "r_$(r)_$(c)" ] )
+                for c2 in 0 .. c
+                    v.push_back( "di[ $(lc.ind[c,c2]) ] * r_$(r)_$(c2)" )
+                finalize_extr << "r_$(r)_$(c) = ( $(join(v," - ")) ) / di[ $( lc.ind[c,c] ) ];\n                "
+                    
+        #
+        stream <<<<
+            #include <iostream>
+            #include <cmath>
+            #include <assert.h>
+            #include <vector>
+            template<class RD,class ST> void chol( RD *res, RD *mat, ST nb_rows ) {
+                typedef typename RD::T T;
+                std::vector<ST> diag; diag.reserve( nb_rows / $br );
+                for(ST r=0;r<nb_rows;r+=$br) {
+                    RD &mat_row = mat[ r / $br ];
+                    RD &res_row = res[ r / $br ];
+                    res_row.indices.reserve( mat_row.indices.size() );
+                    res_row.data.reserve( mat_row.data.size() );
+                    for( ST ci=0; ci < mat_row.indices.size(); ++ci ) {
+                        ST c = mat_row.indices[ci]$dot_ind;
+                        if ( c > r )
+                            break;
+                        const T *d = mat_row.data.data_ + $(lc.size) * ci;
+                        $init_reg
+                        
+                        RD &res_col = res[ mat_row.indices[ci]$dot_ind / $br ];
+                        if ( ci and res_col.indices.size() ) {
+                            ST cc=0, cr=0;
+                            while ( true ) {
+                                if ( res_col.indices[cc] == res_row.indices[cr] ) {
+                                    T *dc = res_col.data.data_ + cc * $( lc.size );
+                                    T *dr = res_row.data.data_ + cr * $( lc.size );
+                                    $sub_reg
+                                    ++cc; ++cr;
+                                    if ( cc == res_col.indices.size() or cr == ci ) break;
+                                }
+                                else if ( res_col.indices[cc] < res_row.indices[cr] ) {
+                                    ++cc;
+                                    if ( cc == res_col.indices.size() ) break;
+                                }
+                                else {
+                                    ++cr;
+                                    if ( cr == ci ) break;
+                                }
+                            }
+                        }
+                        // finalize
+                        res_row.indices.push_back( mat_row.indices[ci] );
+                        if ( mat_row.indices[ci]$dot_ind == r ) {
+                            diag.push_back( res_row.data.size_ );
+                            $finalize_diag_ref
+                        }
+                        else {
+                            const T *di = res_col.data.data_ + diag[ c / $br ];
+                            $finalize_extr
+                        }
+                        $push_reg
+                    }
+                }
+            }
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "chol", [ Ptr[ RD ], Ptr[ RD ], ST ] )
+        ]
+    
+    def get_control_sum
+        return 100
+
+
+# ------------------------------------------------------------------------------------------------------------
+class LazyMatPartSparseCholSub[ T, ST, br, bc, nr, nc, simd_size, incomp ] inherits LazyMatPartSparse[ T, ST, br, bc, nr, nc ]
+    static const RD := LazyMatPartSparseRowData[ T, ST, br, bc, nr, nc, simd_size ]
+    static const nb_row_per_block := br * nr
+    static const nb_col_per_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    static const dot_ind := ".col" * several_blocks
+
+    virtual def nb_rw_estimation
+        return nb_rows * density * nb_col_per_block * T.byte_size
+    
+    virtual def nb_flop_estimation
+        return nb_rows * Float64( density ) ^ 1.5 * nb_col_per_block
+    
+    virtual def evaluate
+        assert( 0, "TODO" )
+    
+    virtual def write_to_stream( stream )
+        stream << "CholSub"
+
+class LazyMatPartSparseCholSubAndDiv[ T, ST, br, bc, nr, nc, simd_size, incomp ] inherits LazyMatPartSparse[ T, ST, br, bc, nr, nc ]
+    static const RD := LazyMatPartSparseRowData[ T, ST, br, bc, nr, nc, simd_size ]
+    static const nb_row_per_block := br * nr
+    static const nb_col_per_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    static const dot_ind := ".col" * several_blocks
+
+    virtual def nb_rw_estimation
+        return nb_rows * density * nb_col_per_block * T.byte_size
+    
+    virtual def nb_flop_estimation
+        return nb_rows * Float64( density ) ^ 1.5 * nb_col_per_block
+    
+    virtual def evaluate
+        assert( 0, "TODO" )
+    
+    virtual def write_to_stream( stream )
+        stream << "SubAndDiv"
+
+
+#
+def chol_sub( b, block_r, block_c, incomp ) when b
+    res := new LazyMatPartSparseCholSub[ b->get_ScalarType(), b->ST, b->br, b->bc, b->nr, b->nc, b->simd_size, incomp ]
+    res->nb_rows = b->nb_rows; res->nb_cols = b->nb_cols
+    res->add_child( b )
+    res->add_child( block_r )
+    if block_r != block_c
+        res->add_child( block_c )
+    #
+    # res->density = max( b->density, block_r->density, block_c->density ) * Float64( b->nb_rows ) ^ 0.63
+    return res
+
+#
+def chol_sub( b, block_r, block_c, incomp ) when not b
+    res := new LazyMatPartSparseCholSub[ block_r->get_ScalarType(), block_r->ST, block_r->br, block_r->bc, block_r->nr, block_r->nc, block_r->simd_size, incomp ]
+    res->nb_rows = block_r->nb_rows; res->nb_cols = block_c->nb_cols
+    res->add_child( block_r )
+    res->add_child( block_c )
+    #
+    # res->density = max( block_r->density, block_c->density ) * Float64( block_r->nb_rows ) ^ 0.63
+    return res
+
+
+#
+def chol_sub_and_div( b, block_r, incomp ) when b
+    res := new LazyMatPartSparseCholSubAndDiv[ b->get_ScalarType(), b->ST, b->br, b->bc, b->nr, b->nc, b->simd_size, incomp ]
+    res->nb_rows = b->nb_rows; res->nb_cols = b->nb_cols
+    res->add_child( b )
+    res->add_child( block_r )
+    #
+    # res->density = max( b->density, block_r->density ) * Float64( block_r->nb_rows ) ^ 0.63
+    return res
+
+
+# ------------------------------------------------------------------------------------------------------------
+
+#
+class LazyVecPartSparseSolveTri[ TR, TM, TV, ST, br, bc, nr, nc, simd_size, inf ] inherits LazyVecPart[ TR, ST ]
+    static const RD := LazyMatPartSparseRowData[ TM, ST, br, bc, nr, nc, simd_size ]
+    static const nb_row_per_block := br * nr
+    static const nb_col_per_block := bc * nc
+    static const several_blocks := ( nr * nc > 1 )
+    static const dot_ind := ".col" * several_blocks
+    static const type_solve := [ "sup", "inf" ][ inf ]
+    
+    static func := UntypedPtr( NULL )
+    static cpp_func ~= CppCompiledFunctionSet_
+        
+    mat_offset ~= ST
+    vec_offset ~= ST
+
+    virtual def nb_rw_estimation
+        M := child_cast( children[0] )
+        return M->nb_rows * M->density * nb_col_per_block + data_size_in_memory()
+    
+    virtual def nb_flop_estimation
+        M := child_cast( children[0] )
+        return M->nb_rows * M->density * nb_col_per_block
+    
+    virtual def evaluate
+        if not func
+            cpp_func.init( self )
+            func = cpp_func[ "solve_tri_$type_solve" ]
+        M := child_cast( children[0] )
+        V := child_cast( children[1] )
+        exec_ccode_function( func, data, M->data, V->data, size, mat_offset, vec_offset )
+    
+    virtual def write_to_stream( stream )
+        stream << "solve_tri_$type_solve"
+
+    def get_src( stream )
+        assert( nr * nc == 1, "TODO : solve tri inf with several blocks" )
+        #
+        lc := LazyMatPartSparseRowDataIndexCalculator[ 1, br, bc, nr, nc, simd_size ]()
+        init_reg := ""
+        for r in 0 .. nb_row_per_block
+            init_reg << "T r_$(r) = vec[ r + $r ];\n        "
+            
+        finalize_diag := ""
+        for r in 0 .. nb_row_per_block
+            for c in 0 .. r
+                finalize_diag << "r_$(r) -= d[ $(lc.ind[ r, c ]) ] * r_$(c);\n        "
+            finalize_diag << "r_$(r) /= d[ $(lc.ind[ r, r ]) ];\n        "
+            finalize_diag << "res[ r + $r ] = r_$(r);\n        "
+                    
+        sub_reg := ""
+        for r in 0 .. nb_row_per_block
+            v := Vec[String]()
+            for c in 0 .. bc
+                v.push_back( "d[ $(lc.ind[r,c]) ] * res[ c + $c ]" )
+            sub_reg << "r_$(r) -= $(join( v, " + " ));\n            "
+                    
+                    
+        #
+        init_reg_diag := ""
+        for r in ( 0 .. br ).reversed
+            v := Vec[String]( [ "res[ r + $r ]" ] )
+            for c in r+1 .. br
+                v.push_back( "d[ $(lc.ind[c,r]) ] * res_$c" )
+            jv := join( v, " - " )
+            init_reg_diag << "T res_$r = ( $jv ) / d[ $(lc.ind[r,r]) ];\n        "
+            init_reg_diag << "res[ r + $r ] = res_$r;\n        "
+                
+        sub_reg_sup := ""
+        for r in 0 .. br
+            v := Vec[String]()
+            for c in 0 .. bc
+                v.push_back( "d[ $(lc.ind[c,r]) ] * res_$c" )
+            jv := join( v, " + " )
+            sub_reg_sup << "res[ c + $r ] -= $jv;\n            "
+                
+        #
+        stream <<<<
+            #include <iostream>
+            #include <cmath>
+            #include <assert.h>
+            #include <vector>
+            template<class T,class RD,class TV,class ST> void solve_tri_inf( T *res, RD *mat, TV *vec, ST size, ST mat_offset, ST vec_offset ) {
+                assert( mat_offset == 0 );
+                vec += vec_offset;
+                for( ST r = mat_offset; r < mat_offset + size; r += $br ) {
+                    $init_reg
+                    
+                    ST ci = 0;
+                    RD &mat_row = mat[ r / $br ];
+                    for( ; ci < mat_row.indices.size() and mat_row.indices[ci] < r; ++ci ) {
+                        ST c = mat_row.indices[ci]$dot_ind;
+                        const T *d = mat_row.data.data_ + ci * $(lc.size);
+                        $sub_reg
+                    }
+                    
+                    // finalize
+                    const T *d = mat_row.data.data_ + ci * $(lc.size);
+                    $finalize_diag
+                }
+            }
+            template<class T,class RD,class TV,class ST> void solve_tri_sup( T *res, RD *mat, TV *vec, ST size, ST mat_offset, ST vec_offset ) {
+                assert( mat_offset == 0 );
+                vec += vec_offset;
+                for( ST r = 0; r < size; ++r )
+                    res[ r ] = vec[ r ];
+                
+                for( ST r=mat_offset + size - $br; r >= mat_offset; r -= $br ) {
+                    RD &mat_row = mat[ r / $br ];
+                    ST ci = mat_row.indices.size() - 1;
+                    T *d = mat_row.data.data_ + ci * $(lc.size);
+                    $init_reg_diag
+                    while ( true ) {
+                        if ( --ci < 0 ) break;
+                        ST c = mat_row.indices[ci]$dot_ind;
+                        T *d = mat_row.data.data_ + ci * $(lc.size);
+                        $sub_reg_sup
+                    }
+                }
+            }
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "solve_tri_$type_solve", [ Ptr[TR], Ptr[ RD ], Ptr[ TV ], ST, ST, ST ] )
+        ]
+    
+    def get_control_sum
+        return 100

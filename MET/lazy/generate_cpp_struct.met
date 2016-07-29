@@ -1,0 +1,289 @@
+def cpp_value( value )
+    if value.is_a_number and value < 0
+        return "m" + String( - value )
+    return String(value)
+
+#~
+    Ex : Vec[String] -> Vec_1_6_String (to appear in files and name of struct)
+~#    
+def met_name( T )
+    if T::is_a_Ptr
+        return met_name( T::T )
+    template_attributes := Vec[String]()
+    for name, value in TemplateAttributeExplorer( partial_instanciation T )
+        if is_of_type_Def( value )
+            template_attributes.push_back( "Def" )
+            template_attributes.push_back( met_name( value ) )
+        else
+            template_attributes.push_back( met_name( value.type ) )
+            tmp := ""
+            for s in cpp_value( value )
+                if s.represents_a_letter or s.represents_a_number or s.represents_an_underscore
+                    tmp += s
+                else
+                    tmp += "_" + (s.val+128)
+            template_attributes.push_back( tmp.size + "_" + tmp )
+    res := T.base_name()
+    if template_attributes.size
+        res = "_$(res.size)_$(res)_$(template_attributes.size // 2)_$(join( template_attributes, "_" ))"
+    return res
+#~
+~#
+def met_name_in_struct( T, name ) when T.type == Def
+    if T::is_a_Ptr
+        return met_name_in_struct( T::T, "" ) + "* " + name
+    if T::is_a_vec_of_static_size
+        return "V<$(met_name_in_struct( T::T, "" )),$(T::static_size)> " + name
+        # return met_name_in_struct( T::T, name ) + "[$(T::static_size)]"
+    return met_name( T ) + " " + name
+
+
+#~
+~#
+def generate_cpp_struct( stream, T, already_generated = Set[String]() )
+    # Basic types
+    BT := [ Float32 Float64 Float96 Int8 Int16 Int32 Int64 Unsigned8 Unsigned16 Unsigned32 Unsigned64 UntypedPtr InternalVariable Bool Def Void Op MultiPtr ]
+    if T in BT
+        return None
+    
+    # Vec[T,n]
+    if T::is_a_vec_of_static_size
+        generate_cpp_struct( stream, T::T, already_generated )
+        return None
+    
+    #
+    pi ~= T
+    for name, value in StaticAttributeExplorer( pi )
+        if is_of_type_Def( value ) and not ( value in BT )
+            stream <<< "struct $(met_name(value));"
+        else if value.type != String and value.is_a_LittleHeterogeneousArray==false and not ( value.type in BT )
+            stream <<< "struct $(met_name(value.type));"
+    for name, value in AttributeExplorer( pi )
+        if value.is_a_vec_of_static_size==false and value.type==MultiPtr and not ( value.type in BT )
+            stream <<< "struct $(met_name(value.type));"
+    
+    
+    # T *
+    if T::is_a_Ptr
+        generate_cpp_struct( stream, T::T, already_generated )
+        return None
+        
+    # else
+    cn := met_name( T )
+    if cn in already_generated
+        return None
+    already_generated.insert( cn )
+    
+    
+    # dependances
+    for name, value in StaticAttributeExplorer( pi )
+        if is_of_type_Def( value )
+            generate_cpp_struct( stream, value, already_generated )
+        else if value.type != String and value.is_a_LittleHeterogeneousArray==false
+            generate_cpp_struct( stream, value.type, already_generated )
+    for name, value in AttributeExplorer( pi )
+        generate_cpp_struct( stream, value.type, already_generated )
+    
+    # decl
+    stream <<< "struct $cn {"
+    stream <<< "    typedef $cn SelfType;"
+    
+    
+    # static attributes
+    wrote_stat_attr := Set[ String ]()
+    for name, value in StaticAttributeExplorer( pi )
+        if not ( name in wrote_stat_attr ) and not is_a_partial_inst( value )
+            wrote_stat_attr.insert( name )
+            if value.type in [Int8 Int16 Int32 Int64 Unsigned8 Unsigned16 Unsigned32 Unsigned64 Bool]
+                stream <<< "    static const $(value.type) $name = $value;"
+            else if is_of_type_Def( value )
+                if value::is_a_Ptr
+                    stream <<< "    typedef struct $(met_name_in_struct(value,name));"
+                else
+                    stream <<< "    typedef $(met_name_in_struct(value,name));"
+            else if value.type == String
+                stream <<< "    static const char *get_$name() { return \"$value\"; }"
+    
+    # virtual ?
+    if contains_virtual_method( pi )
+        stream <<< "    void *real_type;"
+    
+    # attributes
+    for name, value in AttributeExplorer( pi )
+        if value.type == Bool
+            stderr <<< "Warning : Bool has no cpp correspondance (while generating cpp code for $T)."
+        if value.type != Void
+            if value.is_a_Ptr and value.T::is_a_vec_of_static_size
+                stream <<< "    typedef $(met_name_in_struct( value.T, "T_$name" ));"
+                stream <<< "    T_$name *$name;"
+            else
+                stream <<< "    $(met_name_in_struct(value.type,name));"
+    
+    # src
+    add_cpp_meth := pi.get_additional_cpp_methods()
+    if add_cpp_meth
+        stream <<< add_cpp_meth
+    
+    # end decl
+    stream <<< "};"
+        
+
+#
+def write_metil_base_object_for_cpp( stream )
+    stream <<<<
+        #include <stdlib.h>
+        #include <string.h>
+        #include <iostream>
+        #include <sys/types.h>
+        
+        typedef float Float32;
+        typedef double Float64;
+        typedef long double Float96;
+        
+        typedef __int8_t  Int8;
+        typedef __int16_t Int16;
+        typedef __int32_t Int32;
+        typedef __int64_t Int64;
+        
+        typedef __uint8_t  Unsigned8;
+        typedef __uint16_t Unsigned16;
+        typedef __uint32_t Unsigned32;
+        typedef __uint64_t Unsigned64;
+        
+        typedef bool Bool; // this is not true !!
+        
+        typedef void *UntypedPtr;
+        typedef void *Op;
+        
+        struct _Variable_ {
+            void *type;
+            char *data;
+            void *transient_data;
+            unsigned attributes;
+            
+            void *parent_type;
+            char *parent_data;
+            void *parent_transient_data;
+            int *cpt_use; 
+            
+            int name;
+            _Variable_ *prev_named;
+        };
+        
+        template<class T_,int s> struct V {
+            typedef T_ T;
+            static const int static_size = s;
+            V() {}
+            V( const T_ &v ) { for(int i=0;i<s;++i) val[i]=v; }
+            const T &operator[](int i) const { return val[ i ]; }
+            T &operator[](int i) { return val[ i ]; }
+            void operator+=( const V &v ) {
+                for( int i = 0; i < s; ++i )
+                    val[ i ] += v[ i ];
+            }
+            void operator-=( const V &v ) {
+                for( int i = 0; i < s; ++i )
+                    val[ i ] -= v[ i ];
+            }
+            void operator/=( const T &v ) {
+                for( int i = 0; i < s; ++i )
+                    val[ i ] /= v;
+            }
+            T val[s];
+        };
+        template<class T,int s> V<T,s> operator*( const V<T,s> &v, const T &u ) {
+            V<T,s> res;
+            for( int i = 0; i < s; ++i )
+                res[ i ] = v[ i ] * u;
+            return res;
+        }
+        template<class T,int s> V<T,s> operator*( const T &v, const V<T,s> &u ) {
+            V<T,s> res;
+            for( int i = 0; i < s; ++i )
+                res[ i ] = v * u[ i ];
+            return res;
+        }
+        template<class T,int s> V<T,s> operator*( const V<T,s> &v, const V<T,s> &u ) {
+            V<T,s> res;
+            for( int i=0; i < s; ++i )
+                res[ i ] = v[ i ] * u[ i ];
+            return res;
+        }
+        template<class T,int s> V<T,s> operator/( const V<T,s> &v, const T &u ) {
+            V<T,s> res;
+            for( int i = 0; i < s; ++i )
+                res[ i ] = v[ i ] / u;
+            return res;
+        }
+        
+        typedef _Variable_ InternalVariable;
+        typedef _Variable_ MultiPtr;
+        
+        #define PRINT( A ) \
+            std::cout << "  " << __STRING(A) << std::flush << " -> " << (A) << std::endl
+
+
+# 
+def call_cpp_function( function_name, include_file, arguments, build_env = BuildEnv() )
+    # cpp md5
+    cpp_control_str := "$function_name($(build_env.CPPFLAGS+build_env.LDFLAGS)) "
+    used_types := Map[ String, String ]()
+    for v in arguments
+        T := met_name( type_of( v ) )
+        M := get_type_md5_sum( v )
+        cpp_control_str += "$T($M)_"
+    md5_cpp_control_str := md5_str( cpp_control_str )
+    
+    # cpp
+    include_file_without_slash := join( include_file.map( x => [x,"_"][x in ["/","."] ] ), "" )
+    bas_filename := "generated/$(function_name)_in_$(include_file_without_slash)_$(md5_cpp_control_str)"
+    cpp_filename := "$bas_filename.cpp"
+    cpp_modified := false
+    if last_modification_time_or_zero_of_file_named( cpp_filename ) == 0
+        f_cpp := File( cpp_filename, "w" )
+        cpp_modified = true
+        
+        # type info
+        write_metil_base_object_for_cpp( f_cpp )
+        already_generated := Set[String]()
+        for v in arguments
+            generate_cpp_struct( f_cpp, type_of( v ), already_generated )
+        # include
+        f_cpp <<< "#include <$include_file>"
+        
+        # call
+        args := Vec[String]()
+        letters := "abcdefghijklmnopqrstuvwxyz"
+        for v, cpt in arguments, 0...
+            args.push_back( "_Variable_ *var_$cpt" )
+        f_cpp <<< "extern \"C\" void metil_$function_name( $(join( args, ", " )) ) {"
+        for v, cpt in arguments, 0...
+            T := type_of( v )
+            ns := met_name_in_struct(T,"VT_$cpt")
+            f_cpp <<< "    typedef $ns;"
+            args[ cpt ] = "*reinterpret_cast<VT_$cpt *>( var_$cpt->data )"
+        # call
+        f_cpp <<< "    $function_name( $(join(args,",\n        "))\n    );"
+        f_cpp <<< "}"
+    
+    # cpp md5
+    so_control_str := last_modification_time_or_zero_of_file_named( include_file )
+        
+    # so
+    so_filename := "$(bas_filename)_$so_control_str.so"
+    if last_modification_time_or_zero_of_file_named( so_filename ) == 0
+        build_env.make_lib_from_objects( [ cpp_filename ], so_filename, want_so = true, inc_path = [getcwd()] )
+    
+    # ld
+    dl   := DlLoader( so_filename )                   ; assert( dl  , dl.get_last_error() )
+    func := dl.find_symbol( "metil_" + function_name ); assert( func, dl.get_last_error() )
+    if      arguments.size == 0 exec_ccode_function( func )
+    else if arguments.size == 1 exec_ccode_function( func, arguments[0] )
+    else if arguments.size == 2 exec_ccode_function( func, arguments[0], arguments[1] )
+    else if arguments.size == 3 exec_ccode_function( func, arguments[0], arguments[1], arguments[2] )
+    else if arguments.size == 4 exec_ccode_function( func, arguments[0], arguments[1], arguments[2], arguments[3] )
+    else if arguments.size == 5 exec_ccode_function( func, arguments[0], arguments[1], arguments[2], arguments[3], arguments[4] )
+    else if arguments.size == 6 exec_ccode_function( func, arguments[0], arguments[1], arguments[2], arguments[3], arguments[4], arguments[5] )
+    else if arguments.size == 7 exec_ccode_function( func, arguments[0], arguments[1], arguments[2], arguments[3], arguments[4], arguments[5], arguments[6] )
+    else if arguments.size == 8 exec_ccode_function( func, arguments[0], arguments[1], arguments[2], arguments[3], arguments[4], arguments[5], arguments[6], arguments[7] )
+    else assert( 0, "Too much arguments" )

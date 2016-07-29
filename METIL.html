@@ -1,0 +1,100 @@
+<!DOCTYPE html
+   PUBLIC "-//W3C//DTDXHTML 1.0 Strict//EN" "DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="fr" lang="fr">
+<head>
+ <META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html; charset=utf-8">
+<link href="classic.css" rel="stylesheet" type="text/css" />
+<title> Documentation (Officielle) de la librairie LMT++ </title>
+</head>
+<body text="#000000" bgcolor="#ffffff" link="#0000cc" vlink="#551a8b" >
+
+
+<h1 align="center">METIL</h1>
+
+<p class="webpage">
+<p class="texte_documentation">
+</p>
+<h2>Qu'est-ce ?
+</h2>
+<p class="texte_documentation">
+METIL est un langage de programmation orient&eacute; objet et &eacute;valuation paresseuse. Pour la LMT++, il est utilis&eacute; par exemple pour g&eacute;n&eacute;rer les formulations en langage C++.
+</p>
+<h2>R&eacute;cup&eacute;ration et installation
+</h2>
+<p class="texte_documentation">
+Pour r&eacute;cup&eacute;rer les sources de METIL, on les extrait du d&eacute;pot git de l'utilisateur multi en faisant :
+</p>
+<div class="code">
+<tt>
+<pre> 
+git clone git@gitosi:METIL
+
+</pre>
+</tt>
+</div>
+<p class="texte_documentation">
+Maintenant vous avez une copie dans le r&eacute;pertoire courant.
+<br /> On aura besoin des programmes g++, readline, cmake.
+<br /> Pour les installer sur ubuntu :
+</p>
+<div class="liste">
+<ul> 
+<li>g++ et oui en faisant sur ubuntu sudo apt-get install g++
+</li>
+<li>cmake (commande : sudo apt-get install cmake ).
+</li>
+<li>readline (commande : sudo apt-get install libreadline5-dev ).
+</li>
+</ul>
+</div>
+<p class="texte_documentation">
+Cr&eacute;er ensuite les r&eacute;pertoires metil-build, metil-test et metil-bin :
+</p>
+<div class="code">
+<tt>
+<pre> 
+mkdir metil-buld;mkdir metil-bin;mkdir metil-test
+</pre>
+</tt>
+</div>
+<p class="texte_documentation">
+On se d&eacute;place dans le repertoire metil-build pour lancer cmake :
+</p>
+<div class="code">
+<tt>
+<pre> 
+cd metil-buld;cmake -i
+-i pour le mode int&eacute;ractif. Les choix par d&eacute;fauts sont corrects sauf l'emplacement des binaires. Pr&eacute;f&eacute;rez /usr &agrave; /usr/local.  
+</pre>
+</tt>
+</div>
+<p class="texte_documentation">
+Lancer make :
+</p>
+<div class="code">
+<tt>
+<pre> 
+make
+</pre>
+</tt>
+</div>
+<p class="texte_documentation">
+Apr&egrave;s compilation, pour v&eacute;rifier lancer l'interpr&eacute;teur metil :
+</p>
+<div class="code">
+<tt>
+<pre> 
+metil 
+
+</pre>
+</tt>
+</div>
+<p class="ami">
+friend: <a href="mailto:hugo.leclerc@lmt.ens-cachan.fr">hugo.leclerc@lmt.ens-cachan.fr </a>
+</p>
+
+
+
+</body>
+</html>
+

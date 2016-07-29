@@ -1,0 +1,228 @@
+
+#~ 
+~#
+class CppGenerator
+    # Ex: -1 gives "m1"
+    static def cpp_value( value )
+        if value.is_a_number and value < 0
+            return "m" + String( - value )
+        return String(value)
+    # Ex : Vec[String] -> Vec_1_6_String (to appear in files and name of struct)
+    static def cpp_name( T ) when T.type == Def
+        if T::is_a_Ptr
+            return cpp_name( T::T )
+        template_attributes := Vec[String]()
+        for name, value in TemplateAttributeExplorer( partial_instanciation T )
+            template_attributes.push_back( cpp_name( value.type ) )
+            tmp := ""
+            for s in cpp_value( value )
+                if s.represents_a_letter or s.represents_a_number or s.represents_an_underscore
+                    tmp += s
+                else
+                    tmp += "x" + (s.val+128)
+            template_attributes.push_back( tmp.size + "_" + tmp )
+        res := T.base_name()
+        if template_attributes.size
+            res = "_$(res.size)_$(res)_$(template_attributes.size // 2)_$(join( template_attributes, "_" ))"
+        return res
+    # Ex : Ptr[Vec[String]] -> Vec_1_6_String* (to appear in typenames)
+    static def cpp_name_in_struct( T ) when T.type == Def
+        if T::is_a_Ptr
+            return cpp_name_in_struct( T::T ) + "*"
+        return cpp_name( T )
+    # false for std classes
+    static def def_needs_a_cpp_header( T ) when T.type == Def
+        if T::is_a_Ptr
+            return def_needs_a_cpp_header( T::T )
+        return not ( String(T) in [ "Float32" "Float64" "Float96" "Int8" "Int16" "Int32" "Int64" "Unsigned8" "Unsigned16" "Unsigned32" "Unsigned64" "UntypedPtr" "InternalVariable" ] )
+    # 
+    static def get_type_and_additionnal_cpp_methods_md5_sum( v )
+        return get_type_md5_sum( v ) + md5_str( v.additional_cpp_methods )
+    #
+    static def check_or_create_directory( d )
+        absolute := d.size and ( d[0]=="/" or d[0]=="\\" )
+        s := Vec[String]( split_dir( d ) )
+        for i in 1 .. s.size + 1
+            nd := "/" * absolute + join( s[0..i], "/" )
+            if last_modification_time_or_zero_of_file_named( nd ) == 0
+                system( "mkdir $nd 2> /dev/null" )
+    #
+    def add_to_types_to_inc( types_to_inc, types_to_ptr, T, in_ptr = false )
+        if T::is_a_Ptr
+            add_to_types_to_inc( types_to_inc, types_to_ptr, T::T, true )
+        else if def_needs_a_cpp_header( T )
+            if in_ptr
+                if not ( T in types_to_ptr )
+                    types_to_ptr.push_unnamed( T )
+            else
+                if not ( T in types_to_inc )
+                    types_to_inc.push_unnamed( T )
+    #
+    static def generate_type_info_if_necessary( T, files_to_include, base_dir = ".generated_files" )
+        if T::is_a_Ptr
+            generate_type_info_if_necessary( T::T, files_to_include, base_dir )
+            return none
+        if not def_needs_a_cpp_header( T )
+            return none
+        #
+        check_or_create_directory( "$base_dir/generated_type_info" )
+        filename := "$base_dir/generated_type_info/$(cpp_name(T)).h"
+        files_to_include.push_back( filename )
+        pi ~= T
+        # particular case -> static vec
+        if pi.is_a_vec_of_static_size
+            first_line := "// Vec $(pi.size) " + get_type_and_additionnal_cpp_methods_md5_sum( partial_instanciation pi.T )
+            if last_modification_time_or_zero_of_file_named( filename ) # if file exists
+                if File( filename, "r" ).get_next_line() == first_line
+                    return none
+            # else, create it
+            f := File( filename, "w" )
+            cn := cpp_name(T)
+            HEADER := "GENERATED_" + cn.upper() + "_H"
+            f <<< first_line
+            f <<< "#ifndef $HEADER"
+            f <<< "#define $HEADER"
+            if def_needs_a_cpp_header( pi.T )
+                if pi.T::is_a_Ptr
+                    f <<< "struct $(cpp_name(pi.T));"
+                else
+                    f <<< "#include \"$(cpp_name(pi.T)).h\""
+            #
+            f <<< "struct $cn {"
+            f <<< "    typedef $cn SelfType;"
+            # template parameters
+            f <<< "    static const Int32 size_ = $(pi.size);"
+            f <<< "    typedef $(cpp_name_in_struct(pi.T)) T;"
+            f <<< "    typedef $(cpp_name_in_struct(pi.ST)) ST;"
+            f <<< "    T data_[ size_ ];"
+            #
+            f <<< pi.additional_cpp_methods
+            f <<< "};"
+            if def_needs_a_cpp_header( pi.T )
+                if pi.T::is_a_Ptr
+                    files_to_include.push_back( "$base_dir/generated_type_info/$(cpp_name(T)).h" )
+                    # f <<< "#include \"$(cpp_name(pi.T)).h\""
+            f <<< "#endif // $HEADER"
+            f.close()
+            generate_type_info_if_necessary( pi.T, files_to_include, base_dir )
+            return none
+        # generic case
+        first_line := "// " + get_type_and_additionnal_cpp_methods_md5_sum( pi )
+        if last_modification_time_or_zero_of_file_named( filename ) # if file exists
+            if File( filename, "r" ).get_next_line() == first_line
+                return none
+        # else, create it
+        types_to_inc := VarArgs(); types_to_ptr := VarArgs()
+        for name, val in AttributeExplorer( pi )
+            add_to_types_to_inc( types_to_inc, types_to_ptr, val.type )
+        for name, val in StaticAttributeExplorer( pi )
+            if is_of_type_Def( val )
+                add_to_types_to_inc( types_to_inc, types_to_ptr, val, true )
+        #
+        f := File( filename, "w" )
+        cn := cpp_name(T)
+        HEADER := "GENERATED_" + cn.upper() + "_H"
+        f <<< first_line
+        f <<< "struct $cn;"
+        f <<< "#ifndef $HEADER"
+        f <<< "#define $HEADER"
+        #
+        for t in types_to_inc
+            f <<< "#include \"$(cpp_name(t)).h\""
+        for t in types_to_ptr
+            f <<< "struct $(cpp_name(t));"
+            f <<< "#include \"$(cpp_name(t)).h\""
+        #
+        f <<< "struct $cn {"
+        f <<< "    typedef $cn SelfType;"
+        # static parameters
+        for name, val in StaticAttributeExplorer( pi )
+            if val.type in [Int8 Int16 Int32 Int64 Unsigned8 Unsigned16 Unsigned32 Unsigned64]
+                f <<< "    static const $(val.type) $name = $val;"
+            else if is_of_type_Def( val )
+                f <<< "    typedef $(cpp_name_in_struct(val)) $name;"
+            else if val.type == String
+                f <<< "    static const char *get_$name() { return \"$val\"; }"
+        # attributes
+        for name, val in AttributeExplorer( pi )
+            f <<< "    $(cpp_name_in_struct(val.type)) $name;"
+        #
+        if pi.additional_cpp_methods.size
+            f <<< pi.additional_cpp_methods
+        f <<< "};"
+        for t in types_to_ptr
+            files_to_include.push_back( "$base_dir/generated_type_info/$(cpp_name(t)).h" )
+            # f <<< "#include \"$(cpp_name(t)).h\""
+        f <<< "#endif // $HEADER"
+        f.close()
+        #
+        for t in types_to_inc +++ types_to_ptr
+            generate_type_info_if_necessary( t, files_to_include, base_dir )
+            
+            
+#~ 
+~#
+class BuilderEnvironment
+    CXX := "g++"
+    LD := "g++"
+    CPPPATH := Vec[String]( [ ".", "/usr/include", "/usr/local/include", "include" ] )
+    CPPFLAGS := "-g3 -O3 -ffast-math" #
+    LDFLAGS := ""
+    LDPATH := Vec[String]()
+    LIBS := Vec[String](["pthread"])
+    GEN_DIR := absolute_filename( "generated_files" )
+    DYLIB_SUFFIX := ".so"
+    generators := [
+        # ("Element",CppElementGenerator)
+    ]
+    OSTYPE := get_os_type()
+    LD_SO_FLAG := "-dynamiclib" * (OSTYPE=="Darwin") or "-shared"
+    verbose := true
+
+    def get_complete_header_filename( dep, from_file )
+        current_dir := directory_of( from_file ) #[ 0 .. from_file.index_of_last_item_that_checks(_0=="/" or _0=="\\") ]
+        for cpppath in [ ".", GEN_DIR, current_dir ] +++ CPPPATH
+            str := "$cpppath/$dep"
+            if last_modification_time_or_zero_of_file_named( str )
+                return str
+        return ""
+        
+    def in_generated( filename )
+        s := Vec[String]( split_dir( filename ) )
+        nd := GEN_DIR
+        for p, cpt in s, 0...
+            nd += "/" + p
+            if cpt < s.size - 1
+                if last_modification_time_or_zero_of_file_named( nd ) == 0
+                    system( "mkdir $nd 2> /dev/null" )
+        return nd
+        
+    def get_md5_sum_cppflags
+        return md5_str( CXX + " " + join(CPPPATH) + CPPFLAGS )
+
+    def make_object_from_cpp( source, target, want_so )
+        dirs := CPPPATH +++ [ GEN_DIR ]
+        so_flags := "-fPIC" * want_so
+        txt := "$CXX $(join(dirs.map(x=>"-I"+x)," ")) $so_flags $CPPFLAGS -c '$source' -o '$target'"
+        if verbose
+            print txt
+        return system( txt )
+
+    def make_lib_from_objects( sources, target, want_so ) when sources.tensor_order <= 0
+        return make_lib_from_objects( [sources], target, want_so )
+        
+    def make_lib_from_objects( sources, target, want_so )
+        dirs := LDPATH +++ [ GEN_DIR ]
+        so_flags := LD_SO_FLAG * want_so
+        txt := "$LD $(join(dirs.map(x=>"-L"+x)," ")) $(join(LIBS.map(x=>"-l"+x)," ")) $(join(sources.map(x=>"'$x'")," ")) $so_flags $LDFLAGS -o '$target'"
+        if verbose
+            print txt
+        return system( txt )
+
+    
+    
+    
+    
+    
+    
+    

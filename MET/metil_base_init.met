@@ -1,0 +1,540 @@
+## generic init with named arguments ##
+def init( self, varargs ) when varargs.contains_only_named_variables_included_in_self_non_static_variables( self ) pertinence -2
+    init_using_default_values( self )
+    init_using_varargs( self, varargs )
+
+## generic init ##
+def init( self ) pertinence -1
+    init_using_default_values(self)
+
+# default init with one arguments (Ex : used by 'a := b' if 'a' does not contain an init method) ##
+def init( self, __source_object__ ) pertinence -1
+    if init_and_return_false_if_same_types( self, __source_object__ )
+       __source_object__.conversion_to( self ) #
+    
+# default init with one arguments (Ex : used by 'a := b' if 'a' does not contain an init method) ##
+def init( self, __source_object__ ) when __is_a_Property__( __source_object__ ) pertinence -0.5
+    a := __source_object__; self.init( a )
+    
+## default reassign ##
+def reassign( self, __source_object__ ) pertinence -1
+    #if reassign_and_return_false_if_same_types( self, __source_object__ )
+    self.destroy()
+    self.init( __source_object__ )
+        #__source_object__.conversion_to( self )
+        # self.reassign( )
+
+# default reassign with one arguments (Ex : used by 'a := b' if 'a' does not contain an reassign method) ##
+def reassign( self, __source_object__ ) when __is_a_Property__( __source_object__ ) pertinence -0.5
+    self.reassign( get_value_prop __source_object__ )
+    
+## default conversion_to -> error message ##
+def conversion_to( self, b )
+    stack_info()
+    assert( 0, "Unable to convert type '"+self.type+"' to type '"+b.type+"'" )
+
+## default destroy -> do nothing ##
+def destroy( self ) pertinence -1
+    destroy_instanciated_attributes( self )
+
+## basic constant ##
+const true  := Bool(1)
+## basic constant ##
+const false := Bool(0)
+
+class None
+    pass
+const none := None()
+
+# return true if cond is known_at_compile_time and is true
+def assumed( cond )
+    return Bool( cond )
+
+## Used to determine if args of classes are identical ##
+def _1_andreassign_2__eq__3( a, b, c ) pertinence 10000
+    if a
+        a = ( b == c )
+
+##  ##
+def __property_init__( __prop__, varargs )
+    pr_te := __prop__
+    call( pr_te.init, varargs )
+
+##  ##
+def __property_reassign__( __prop__, varargs )
+    # pr_te := __prop__
+    # call( pr_te.reassign, varargs )
+    call( ( get_value_prop __prop__ ).reassign, varargs )
+
+##  ##
+def __property_call__( __prop__, varargs )
+    pr_te := __prop__
+    call( pr_te, varargs )
+
+##  ##
+def __property_call_with_return__( __prop__, varargs )
+    pr_te := __prop__
+    return call_with_return( pr_te, varargs )
+
+##  ##
+def __property_call_partial_inst__( __prop__, varargs )
+    pr_te := __prop__
+
+##  ##
+def __property_call_partial_inst_with_return__( __prop__, varargs )
+    pr_te := __prop__
+    res ~= pr_te
+    return res
+
+## primitives contain a call which applies on varargs ##
+def call( function, varargs )
+    call( function, varargs )
+
+## primitives contain a call which applies on varargs ##
+def call_with_return( function, varargs )
+    return call_with_return( function, varargs )
+    
+## only for properties (type_of with pertinence 10 has been defined in primitives). ##
+def type_of( __prop__ )
+    if __prop__.__has_type_of_function__()
+        return __prop__.__get_type_of_function__()()
+    pr_te := __prop__
+    return type_of(pr_te  )
+    
+def are_radically_different(A,B) when __is_a_Property__(A) pertinence 11 return are_radically_different(get_value_prop A,B)
+def are_radically_different(A,B) when __is_a_Property__(B) pertinence 10 return are_radically_different(A,get_value_prop B)
+def are_similar_for_sure   (A,B) when __is_a_Property__(A) pertinence 11 return are_similar_for_sure   (get_value_prop A,B)
+def are_similar_for_sure   (A,B) when __is_a_Property__(B) pertinence 10 return are_similar_for_sure   (A,get_value_prop B)
+
+## equal for definitions (because partial_instanciation is easier to do in .met files) ##
+def equal( A, B ) when are_of_type_Def( A, B ) pertinence 10000
+    # return are_of_same_type(  )
+    if are_radically_different(A,B)
+        return false
+    if are_similar_for_sure(A,B)
+        return true
+    if A.is_a_class() 
+        if B.is_a_class()
+            # info A, B, are_similar_for_sure(A,B)
+            return are_of_same_type( partial_instanciation A, partial_instanciation B )
+        else
+            return false
+    if B.is_a_class() return false
+    return have_same_name( A, B )
+    
+## default __for__ for classes with size and select ##
+def __for__( self, block ) when has_size_and_select( self ) pertinence 0
+    cpt := 0; while cpt < self.size
+        block( self[cpt++] )
+    
+## make_varargs( 1, 2, "toto" ) -> VarArgs( 1, 2, "toto" ) ##
+def make_varargs( varargs )   return varargs
+
+## ##
+def partial_inst( v )  return partial_instanciation v
+
+##  ##
+class AttributeExplorer
+    va := InternalVariable()
+    def init( v )             va.init_using_var( v )
+    def get_size              return nb_attributes_of( @va )
+    def select( n )           return make_varargs( name_attribute_nb_of( @va, Int32(n) ), attribute_nb_of( @va, Int32(n) ) )
+
+##  ##
+class StaticAttributeExplorer
+    va := InternalVariable()
+    def init( v )             va.init_using_var( v )
+    def get_size              return nb_static_attributes_of( @va )
+    def select( n )           return make_varargs( name_static_attribute_nb_of( @va, Int32(n) ), static_attribute_nb_of( @va, Int32(n) ) )
+
+##  ##
+class TemplateAttributeExplorer
+    va := InternalVariable()
+    def init( v )             va.init_using_var( v )
+    def get_size              return nb_template_parameters_of( @va )
+    def select( n )           return make_varargs( name_template_parameter_nb_of( @va, Int32(n) ), template_parameter_nb_of( @va, Int32(n) ) )
+    
+##  ##
+def apply_functionnal_( func, varargs )
+    assert( 0, "TODO : apply_functionnal_ without return." )
+
+##  ##
+def apply_functionnal( func, varargs ) apply_functionnal_( func, varargs )
+    
+## va must be of type VarArgs. func is a Ref on a Functionnal ##
+def apply_functionnal_with_return_( func, va )
+    if comes_from_an_apply_with_functionnal_arg( func )
+        arguments := VarArgs()
+        for i in 0 .. nb_variables_in_functionnal( func )
+            if variables_num_is_functionnal_in_functionnal( func, i )
+                arguments.push_unnamed( apply_functionnal_with_return_( extract_var_nb_defined_in_functionnal( func, i ), va ) )
+            else
+                arguments.push_unnamed( @extract_var_nb_defined_in_functionnal( func, i ) )
+        if is_a_Ref_on_Functionnal( extract_var_defined_in_functionnal( func ) )
+            return call_with_return( apply_functionnal_with_return_( extract_var_defined_in_functionnal( func ), va ) ##returns a Ref on the corresponding Functionnal##, arguments )
+        return call_with_return( @extract_var_defined_in_functionnal( func ) ##returns a Ref on the corresponding Functionnal##, arguments )
+    else if comes_from_a_get_attr_with_functionnal_lhs( func )
+        lhs := ref apply_functionnal_with_return_( extract_var_defined_in_functionnal( func ) ##returns a Ref on the corresponding Functionnal##, va )
+        str := ref extract_attr_defined_in_functionnal( func )
+        return lhs.$str
+    else if comes_from_a_predefined_functionnal( func )
+        return extract_arg_defined_in_functionnal( func, va )
+    
+##  ##
+def apply_functionnal_with_return( func, varargs ) return apply_functionnal_with_return_( func, varargs )
+        
+        
+def nb_attributes( self )
+    return nb_attributes_of( self )
+
+def attribute_nb( self, n )
+    return attribute_nb_of( self, n )
+
+def name_attribute_nb( self, n )
+    return name_attribute_nb_of( self, n )
+
+# # ---------------------------------------------------------------------------------------------------------------------------------------------
+def sizeof( T )
+    return ( size_of( partial_instanciation T ) + 7 ) // 8
+
+const null_ptr := UntypedPtr( 0 )
+
+## pointer of type T. Internally represented by a 'void *'. ##
+class Ptr(T)
+    # is_a_pointer -> point to something (Ptr[], MultiPtr, ...)
+    property is_a_Ptr, does_not_need_destroy, is_a_pointer
+    def init()                                           pass
+    def init( val ) when is_of_type_UntypedPtr(val)      ptr.init( val )
+    def init( val ) when type_of(val)==Null              ptr.init( 0 )
+    def init( val ) when val.is_a_Ptr and val.T==T       ptr.init( val.ptr )
+    def init( val )                                      assert( val.is_Untyped or inheritance( @val, partial_instanciation T ), "pointers do not adress to the same type ($T <- $(val.T))" ); ptr.init( UntypedPtr( val ) )
+    def reassign( val ) when is_of_type_UntypedPtr(val)  ptr = val
+    def reassign( val ) when type_of(val)==Null          ptr = 0
+    def reassign( val ) when val.is_a_Ptr and val.T==T   ptr = val.ptr
+    def reassign( val )                                  assert( inheritance( @val, partial_instanciation T ), "pointers do not adress to the same type ($(val.T) != $T)" ); ptr = UntypedPtr( val )
+    def select( n )                                      return __get_data_in_dyn_vec__( ptr, partial_instanciation T, Int32(n) )
+    def free                                             ptr.free()
+    def pointed_value                                    return __get_pointed_value__( ptr, partial_instanciation T )
+    def conversion_to( r ) when is_of_type_Bool(r)       r.init( ptr )
+    def conversion_to( r ) when is_of_type_UntypedPtr(r) r.init( ptr )
+    def write_to_stream( stream )                        stream << ptr
+    def equal( p ) when p.is_a_Ptr                       return p.ptr == ptr
+    def equal( p ) when is_of_type_UntypedPtr( p )       return p == ptr
+    def equal( p )                                       return UntypedPtr( p ) == ptr
+    def copy                                             return new T( pointed_value() )
+    def get_pointer_attributes                           return [ ( self, 1 ) ] # for serialization
+    def to_Ptr                                           return self
+    ptr ~= UntypedPtr
+
+def type_promote( a, b, op ) when a.is_a_Ptr and is_of_type_UntypedPtr(b) return UntypedPtr
+def type_promote( a, b, op ) when b.is_a_Ptr and is_of_type_UntypedPtr(a) return UntypedPtr
+
+## ##
+def add( a, b ) when a.is_a_Ptr and b.tensor_order <= 0 pertinence 1000
+    return Ptr[ a.T ]( a.ptr + Int32( b * a.T.byte_size_if_in_vec ) )
+## ##
+def sub( a, b ) when a.is_a_Ptr and b.tensor_order <= 0 and not b.is_a_Ptr pertinence 1000
+    return Ptr[ a.T ]( a.ptr + Int32( - b * a.T.byte_size_if_in_vec ) )
+
+## ##
+def sub( a, b ) when a.is_a_Ptr and b.is_a_Ptr pertinence 1000
+    assert( a.T == b.T, "substraction of Ptr[T1] and Ptr[T2] with T1(=$(a.T)) != T2(=$(b.T))" )
+    return ( a.ptr - b.ptr ) // Int32( size_of(partial_instanciation a.T) / 8 )
+
+## ##
+def equal         ( a, b ) when a.is_a_Ptr and b.is_a_Ptr pertinence 1000  return a.ptr == b.ptr
+def inferior      ( a, b ) when a.is_a_Ptr and b.is_a_Ptr pertinence 1000  return a.ptr <  b.ptr
+def superior      ( a, b ) when a.is_a_Ptr and b.is_a_Ptr pertinence 1000  return a.ptr >  b.ptr
+def inferior_equal( a, b ) when a.is_a_Ptr and b.is_a_Ptr pertinence 1000  return a.ptr <= b.ptr
+def superior_equal( a, b ) when a.is_a_Ptr and b.is_a_Ptr pertinence 1000  return a.ptr >= b.ptr
+def not_equal     ( a, b ) when a.is_a_Ptr and b.is_a_Ptr pertinence 1000  return a.ptr != b.ptr
+    
+    
+def reinterpret_cast( T, p )
+    return T( UntypedPtr( p ) )
+    
+## Reference on an object of type T. ##
+class RefOn[T]
+    obj := InternalVariable()
+    cpt := UntypedPtr()
+    def init_using_var( v )
+        obj.init_using_var( v )
+    def pointed_value
+        return @obj
+
+
+## ##
+def pointer_on( val )
+    return Ptr[ type_of(val) ]( untyped_ptr_on( val ) )
+
+## @ptr ##
+def pointed_value( ptr )
+    return ptr.pointed_value()
+    
+## reserve room in memory for n variables of type T. Returns a Ptr[T] ##
+def allocate( T, n = 1 )
+    return Ptr[T]( allocate( size_of_if_in_vec(partial_instanciation T), Int32(n) ) )
+
+#~ T_alignement in bytes ~#
+def allocate( T, n, T_alignement )
+    bs := size_of_if_in_vec(partial_instanciation T)
+    return Ptr[T]( allocate( bs, Int32(n), T_alignement ) )
+    
+#~~#
+def malloc( size )
+    return allocate( 8, size )
+
+
+## reserve room in memory for n variables of type T. Returns a Ptr[T] ##
+def __new__( T, varargs )
+    res := Ptr[T]( allocate( size_of(partial_instanciation T), 1 ) )
+    call( res->init, varargs )
+    return res
+
+##  ##
+def __delete__( v )
+    if v
+        v->destroy()
+        v.free()
+    
+#
+def add( a, b ) when type_of( a ) == UntypedPtr
+    return add( a, Int32(b) )
+
+# p := Ptr[Toto]; p = NULL...
+class Null
+    property is_a_pointer, is_Null
+    def conversion_to( b ) when is_of_type_Bool( b )
+        b.init( false )
+    def conversion_to( b ) when is_of_type_UntypedPtr( b )
+        b.init( 0 )
+    
+const NULL := Null()
+
+def equal( a, b ) when a.is_a_Ptr and b.is_Null
+    return a.ptr == UntypedPtr( 0 )
+
+const SizeType := ( Int32, Int64 )[ size_of(UntypedPtr) == 64 ]
+
+def type_promote( a, b, op ) when a.is_Null and is_of_type_UntypedPtr( b )
+    return NULL
+
+def type_promote( a, b, op ) when b.is_Null and is_of_type_UntypedPtr( a )
+    return NULL
+
+# ---------------------------------------------------------------------------------------------------------------------------------------------
+#~ hum... ~#
+class SpinLock
+    val := 0
+    def acquire
+        # hum...
+        while val
+            pass
+        val = 1
+    def release
+        val = 0
+
+# # ---------------------------------------------------------------------------------------------------------------------------------------------
+
+## String (like "Hello World" in the program "Hello World") ##
+class String
+    static const tensor_order := 0
+    property is_a_String
+    def init( s ) when s.is_a_String pertinence 5
+        size_.init( s.size_ ); reserved_.init( s.size_ ); encoding_.init( 0 )
+        if s.size_
+            data_ = allocate( 8, s.size_ )
+            memcpy( data_, s.data_, 8, s.size_ )
+    def init( s )                             pertinence 4     sst := StringStream(); sst << s; init( sst.str )
+    def init( reservation )                   pertinence 3     size_ = 0;    encoding_ = 0; reserved_ = reservation; if reservation  data_ = allocate( 8, reservation )
+    def init( size, reservation=size )        pertinence 3     size_ = size; encoding_ = 0; reserved_ = reservation; if reservation  data_ = allocate( 8, reservation )
+    def init( size, data )                    pertinence 3
+        size_ = size; encoding_ = 0; reserved_ = 0
+        if have_same_name(String,type_of(data))
+            data_ = data.data_
+        else if data.is_a_Ptr
+            data_ = data.ptr
+        else
+            data_ = data
+    def init( c_str )                          pertinence -2
+        init( size = strlen( UntypedPtr( c_str ) ), data = c_str )
+    def reassign( s ) when s.is_a_String                       destroy(); init(s)
+    def destroy                                                if reserved_  data_.free()
+    def write_to_stream( stream )                              stream.write( data_, size_ )
+    def conversion_to( val ) when type_of(val)==Bool           val.init( size_ )
+    def get_ptr                                                return Ptr[Unsigned8]( data_ )
+    def ends_by( str )
+        if size_ < str.size
+            return false
+        for s, j in str, size_ - str.size .. size_
+            if s != select(j)
+                return false
+        return true
+    def begins_with( str )
+        return size_ >= str.size and select(0..str.size) == str
+    def append( p, n ) when is_of_type_UntypedPtr( p )
+        if size_ + n <= reserved_
+            memcpy( data_+size_, p, 8, Int32(n) )
+            size_ += n
+        else
+            old_reserved_ := reserved_
+            reserved_ = max( 2 * reserved_, size_ + n )
+            n_data := allocate( 8, reserved_ )
+            memcpy( n_data      , data_, 8, size_ )
+            memcpy( n_data+size_,     p, 8, Int32(n) )
+            if old_reserved_  data_.free()
+            data_ = n_data
+            size_ += n
+    def append( p, n )
+        append( p.ptr, n * size_of(partial_instanciation p.T) // 8 )
+    def find_sequence( seq_, index_if_failed = size_ )
+        seq := String( seq_ )
+        for i in 0 .. size_ - seq.size_ + 1
+            if String( size = seq.size_, data = data_ + i ) == seq
+                return i
+        return index_if_failed
+    def get_size #pertinence 1000
+        return size_
+    def select( n ) when n.is_a_number
+        return Char( __get_data_in_dyn_vec__( data_, partial_instanciation Int8, Int32(n) ) )
+    def select( vec ) when have_same_name( type_of(vec), OpenRange ) and vec.increment == 1 pertinence 100
+        return String( size = size_ - vec.begin, data = data_ + vec.begin )
+    def select( vec ) when have_same_name( type_of(vec), Range ) and vec.increment == 1 pertinence 10
+        return String( size = vec.end - vec.begin, data = data_ + vec.begin )
+    def equal( str ) when str.is_a_String
+        if size_ != str.size
+            return false
+        for cpt in 0 .. size_
+            if select( cpt ) != str.select( cpt )
+                return false
+        return true
+    def get_lines
+        return LinesOfStream( StringStream( self ) )
+    def upper
+        res := StringStream()
+        for i in self
+            res << Char( i.val - 32 * ( i.val >= 97 and i.val <= 122 ) )
+        return res.str
+    def strip
+        p := self.ptr
+        b := 0;          while b < get_size() and   p[b  ] in [ord(" "),ord("\n"),ord("\t"),ord("\r")]    b++
+        e := get_size(); while e              and ( p[e-1] in [ord(" "),ord("\n"),ord("\t"),ord("\r")] )  e--
+        if e > b
+            self = String( data = p + b, size = e - b )
+        else
+            self = ""
+    def get_pointer_attributes
+        return [ ( @Ptr[Ptr[Int8]]( (&data_).ptr ), reserved_ ) ]
+    def get_additional_cpp_methods
+        return "
+    Int32 size() const { return size_; }
+    Int32 reserved() const { return reserved_; }
+    const char &operator[]( Int32 i ) const { return reinterpret_cast<const char *>(data_)[ i ]; }
+    char &operator[]( Int32 i ) { return reinterpret_cast<char *>(data_)[ i ]; }
+    const char *ptr() const { return reinterpret_cast<const char *>(data_); }
+    char *ptr() { return reinterpret_cast<char *>(data_); }
+    const char *begin() const { return reinterpret_cast<const char *>(data_); }
+    char *begin() { return reinterpret_cast<char *>(data_); }
+    const char *end() const { return reinterpret_cast<const char *>(data_) + size_; }
+    char *end() { return reinterpret_cast<char *>(data_) + size_; }
+    const char &back() const { return reinterpret_cast<const char *>(data_)[size_-1]; }
+    char &back() { return reinterpret_cast<char *>(data_)[size_-1]; } 
+    bool operator==( const char *v ) const { return size_==strlen(v) and strncmp( v, (char *)data_, size_ )==0; }
+    void init( const char *v ) { 
+        encoding_ = 0;
+        size_ = strlen(v);
+        reserved_ = size_;
+        if ( reserved_ ) {
+            data_ = (char *)malloc( size_ );
+            memcpy( data_, v, size_ );
+        }
+    }
+    char *c_str() { 
+        if ( reserved_ <= size_ ) {
+            char *nd = (char *)malloc( size_ + 1 );
+            memcpy( nd, data_, size_++ );
+            reserved_ = size_;
+            data_ = nd;
+        }
+        ((char *)data_)[size_] = 0;
+        return (char *)data_;
+    }"
+    data_ := UntypedPtr()
+    size_ := 0
+    reserved_ := 0
+    encoding_ := 0
+    
+def add( a, b ) when type_of(a) == String and type_of(b) == String
+    res := String( size = a.size_ + b.size_ )
+    memcpy( res.data_        , a.data_, 8, a.size_ )
+    memcpy( res.data_+a.size_, b.data_, 8, b.size_ )
+    return res
+    
+def mul( a, n ) when type_of(a) == String
+    res := String( size = a.size_ * n )
+    for i in 0 .. n
+        memcpy( res.data_ + i * a.size_, a.data_, 8, a.size_ )
+    return res
+
+def shift_left( s, a ) when s.is_a_String
+    s += a
+    return s
+    
+## "Toto" -> "TOTO"##
+def to_upper(a) return a.upper()
+    
+## return true if s contains v ( like "toto" in "pouetotoxouet" )##
+def __in__( v, s ) when v.is_a_String and s.is_a_String pertinence 10
+    for cpt in 0 .. s.size + 1 - v.size
+        if v == String( size = v.size, data = s.data_ + cpt )
+            return true
+    return false
+
+## return true if s contains v ( like "toto" in "pouetotoxouet" )##
+def __in__( v, s ) when v.type == Char and s.type == String pertinence 10
+    for i in 0 .. s.size
+        if v == s[i]
+            return true
+    return false
+
+# used in "toto $tata pouet" to give 'toto 6548798321.1 pouet' if tata == 6548798321.1
+def __string_assembly__( a, b ) return String(a) + String(b)
+    
+# @relates String
+def __str_partial_instanciations__  s ~= String
+__str_partial_instanciations__()
+
+def stack_info( n = 200 )
+    for i in 3 .. min( n + 4, __nb_stack_level__() )
+        print __file_at_stack_level__(i), __line_at_stack_level__(i)
+
+# # ---------------------------------------------------------------------------------------------------------------------------------------------
+def pthread_create( function, varargs )
+    assert( varargs.nb_named_arguments()==0, "TODO" )
+    n_varargs := VarArgs()
+    for v in varargs
+        n_varargs.push_unnamed( v.type( v ) )
+    return pthread_create_( function, n_varargs )
+
+# # ---------------------------------------------------------------------------------------------------------------------------------------------
+import "metil_base_vecop.met"
+import "metil_base_default_behavior.met"
+import "metil_base_stream.met"
+import "metil_base_vector.met"
+import "metil_base_type_help.met"
+import "metil_base_array.met"
+import "metil_base_tensor.met"
+import "metil_base_matrix.met"
+import "metil_base_symbol.met"
+import "metil_base_plot.met"
+import "metil_base_program.met"
+import "metil_base_argv.met"
+import "metil_base_map.met"
+import "metil_base_polynomial.met"
+import "metil_base_complex.met"
+import "metil_base_big_unsigned.met"
+# import "metil_base_serialization.met"
+import "metil_base_mpi.met"
+# import "lazy_mat.met"
+
+base_generated_files := "generated"

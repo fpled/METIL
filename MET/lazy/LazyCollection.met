@@ -1,0 +1,21 @@
+
+#~
+    A place where are all active object for a given context are stored.
+    Allow memory management stuff, like serialization of an "old" LazyObject,
+    far from current graph to free needed memory
+~#
+class LazyCollection
+    active_lazy_objects   := SplittedVec[ Ptr[ LazyObjectAncestor ], 64 ]() #
+    # computer_pool        ~= LazyComputerPool
+    current_operation_id := Int64( 1 ) #
+    
+    def register( lo )
+        active_lazy_objects.push_back( Ptr[ LazyObjectAncestor ]( lo ) )
+        # ld->cpu = computer_pool.cpus.begin # on the first cpu by default
+    
+    def remove( lo )
+        ind := active_lazy_objects.index_of_first_item_equal_to( Ptr[ LazyObjectAncestor ]( lo ), -1 )
+        assert( ind >= 0, "weird" )
+        active_lazy_objects.remove_unordered( ind )
+
+    

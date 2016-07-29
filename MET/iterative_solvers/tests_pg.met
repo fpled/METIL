@@ -1,0 +1,29 @@
+
+import "iterative_solver.met"
+
+# --------------------------------------------------------------------------------------------------------------------
+def main()
+    m := TM(10,10) ; m = 0;
+    g := MatVecList[T]()
+    c := MatVecList[T]()
+#    g.push_back([ 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 ]) 
+#    c.push_back([ 1, 0, 0, 0, 0, 1, 0, 0, 0, 0  ])
+    for i in 0..m.nb_rows 
+        for j in 0..m.nb_cols
+            m[i,j] = i+j
+    m.diag += 10 ;
+    id := IdentityMatrix()
+    solver := gmres( m, id, g, c )
+    solver.convergence_criterion = 1e-6
+    solver.subspace.ortho_keep = 10
+    solver.rhs.values = 10
+    solver.e_g.values = 0
+    solver.solve()
+    solver.verify_solution()
+
+# --------------------------------------------------------------------------------------------------------------------
+stdout.options.precision = 10
+T := Float64
+TM := Mat[Float64,Gen[10,10]]
+main()
+

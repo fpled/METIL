@@ -1,0 +1,250 @@
+import "lazy/LazyVec.met"
+import "InstanceParametricElement.met"
+
+#~
+    T is used only when ElemList is a gateway to nodal pos data ( as in "for e in m.elem_list ..." )
+~#
+# class ElemList[ dim, T, ST ] inherits FieldSupport
+    # property is_an_ElemList
+    
+    # sub_lists := Vec[ PtrWithCptUse[ ElemSubListAncestor ] ]()
+    # position  := Field[ Vec[ T, dim ] ]()
+    
+    # def init_
+        # position.met_name = "P"
+        # position.tex_name = "P"
+    
+    # def __for__( block )
+        # for s in sub_lists
+            # s->__for__( block, position )
+
+    # def get_size
+        # res := 0
+        # for s in sub_lists
+            # res += s->size
+        # return res
+    
+    # virtual def get_nb_nodes # not available for all kinds of interpolations
+        # return position.nb_nodes
+        
+# #~
+# ~#
+# class ElemSubListAncestor
+    # cpt_use  := 0
+    
+    # virtual def get_size                  abstract
+    # virtual def __for__( block, pos_ptr ) abstract
+    # virtual def make_interpolation( interpolation_type, field_interpolation, met_name, tex_name )
+        # abstract
+    
+    
+
+# #~
+    # NE -> element type (Triangle, Quad, ...)
+# ~#
+# class ElemSubList[ NE, dim, ST, TM ] inherits ElemSubListAncestor
+    # static const TE := InstanceParametricElement[ NE, dim, ST ]
+    # static const symbolic_element := SymbolicElement[ NE, dim ]( "elem" )
+    
+    # lazy_vec := LazyVec[ TE, ST, Vec[ST] ]() # Vec[ST] to store number of sub_vec in node_list
+
+    # virtual def get_size
+        # return lazy_vec.size
+    
+    # virtual def __for__( block, position )
+        # for s in lazy_vec.sub_vecs
+            # ls := LazySimpleScheduler( [ s.ptr ] ); ls.execute() # make elem lists
+            # de := Vec[ Ptr[ LazyObjectAncestor ] ]( size = s->extr.size )
+            # for e, d in s->extr, de
+                # d = position.data.sub_vecs[ e ].ptr
+            # ln := LazySimpleScheduler( de ); ln.execute() # make corresponding node lists
+            # #
+            # for i in 0 .. s->size
+                # block( InstanceParametricElementWithMeshPtr[ NE, dim, ST, TM ]( inst = s->data + i, mesh = &m ) )
+    
+    # virtual def make_interpolation( res, interpolation_type, met_name, tex_name )
+        # symbolic_element.make_interpolation( res, interpolation_type, met_name, tex_name )
+
+# -------------------------------------------------------------------------------------------
+# Element reader
+# -------------------------------------------------------------------------------------------
+
+#~
+~#
+class LazyElemListBaseCompiledFunction[ TE, ST ]
+    def get_src( stream ) 
+        stream <<<< 
+            #include <iostream>
+            #include <fstream>
+            template<class TE,class S,class ST,class TV> void read_elem_list_from_file( TE *res, const S &filename, ST beg_seek, ST size, ST num_node_list_beg, ST nb_nodes_per_sub_vec, TV &node_lst ) {
+                std::ifstream f( (const char *)filename.data_ );
+                f.seekg( beg_seek, std::ios_base::beg );
+                //
+                ST *p = reinterpret_cast<ST *>( res );
+                for( ST num_elem=0; num_elem < size; ++num_elem ) {
+                    for( ST num_node=0; num_node < TE::nb_nodes; ++num_node ) {
+                        ST nn; f.read( (char *)&nn, sizeof(ST) );
+                        ST nl = num_node_list_beg + nn / nb_nodes_per_sub_vec;
+                        *(p++) = nl;
+                        *(p++) = nn % nb_nodes_per_sub_vec;
+                        node_lst.push_back_unique( nl );
+                    }
+                }
+            }
+            template<class TE,class S,class ST,class TV> void write_elem_list_to_file( TE *res, const S &filename, const S &mode, ST size, TV &cum_node_size ) {
+                FILE *f = fopen( (const char *)filename.data_, (const char *)mode.data_ );
+                for( ST num_elem = 0; num_elem < size; ++num_elem ) {
+                    for( ST num_node = 0; num_node < TE::nb_nodes; ++num_node ) {
+                        ST val = cum_node_size[ res[num_elem].ind[ num_node ].num_lst ] + res[num_elem].ind[ num_node ].index;
+                        fwrite( (char *)&val, sizeof( ST ), 1, f );
+                    }
+                }
+                fclose( f );
+            }
+            template<class TE,class S,class ST> void write_type_elem_to_file( TE *res, const S &filename, const S &mode, ST size ) {
+                FILE *f = fopen( (const char *)filename.data_, (const char *)mode.data_ );
+                for( ST num_elem = 0; num_elem < size; ++num_elem ) {
+                    ST val = TE::vtk_num;
+                    fwrite( (void *)&val, sizeof( ST ), 1, f );
+                }
+                fclose( f );
+            }
+            template<class TE,class S,class ST> void write_offset_elem_to_file( TE *res, const S &filename, const S &mode, ST size, ST off ) {
+                FILE *f = fopen( (const char *)filename.data_, (const char *)mode.data_ );
+                for( ST num_elem = 0; num_elem < size; ++num_elem ) {
+                    off += TE::nb_nodes;
+                    fwrite( (void *)&off, sizeof( ST ), 1, f );
+                }
+                fclose( f );
+            }
+    #
+    def get_wanted_functions
+        return [ 
+            CppFunctionDescription( "read_elem_list_from_file", [ Ptr[TE], String, ST, ST, ST, ST, Vec[ST] ] )
+            CppFunctionDescription( "write_elem_list_to_file", [ Ptr[TE], String, String, ST, Vec[ST] ] )
+            CppFunctionDescription( "write_type_elem_to_file", [ Ptr[TE], String, String, ST ] )
+            CppFunctionDescription( "write_offset_elem_to_file", [ Ptr[TE], String, String, ST, ST ] )
+        ]
+    def get_control_sum
+        return 50
+
+
+#~
+    sub_vecs_push_back(
+        new_lazy_leave( LazyElemListOperatorReadFromFile[ TE, ST ], beg, size, filename )
+    )
+    TE is something like InstanceParametricElement[ NE, ST ]( ... )
+~#
+class LazyElemListOperatorReadFromFile[ TE, ST ] inherits LazyVecPart[ TE, ST, Vec[ST] ]
+    static func := CppCompiledFunctionSet[ LazyElemListBaseCompiledFunction[ TE, ST ] ]::get_func("read_elem_list_from_file")
+
+    beg_seek             := ST( 0 ) # offset in bytes
+    filename             := ""      # ...
+    num_node_list_beg    := ST( 0 )
+    nb_nodes_per_sub_vec := ST( 0 )
+    
+    def init( b, s, f, nb, ns ) # b -> offset in bytes, s -> nb elements
+        init_lazy_obj()
+        beg_seek = b
+        size = s
+        filename = f
+        num_node_list_beg    = nb
+        nb_nodes_per_sub_vec = ns
+        
+    def init_would_give_the_same_result( b, s, f, nb, ns )
+        return beg_seek == b and size == s and filename == f and num_node_list_beg == nb and nb_nodes_per_sub_vec == ns
+    
+    virtual def evaluate
+        if not filename.ends_by("\0") filename += "\0"
+        exec_ccode_function( func, data, filename, beg_seek, size, num_node_list_beg, nb_nodes_per_sub_vec, extr )
+    
+    virtual def write_to_stream( stream )
+        stream << "EFF" # [$TE,$filename,$beg_seek,$size]
+
+#~
+~#
+class LazyElemListOperatorWriter[ TE, ST ] inherits LazyObjectAncestor
+    static func := CppCompiledFunctionSet[ LazyElemListBaseCompiledFunction[ TE, ST ] ]::get_func("write_elem_list_to_file")
+    
+    filename      := ""
+    mode          := "" # w, a, ...
+    done_         := false
+    cum_node_size := Vec[Int32]()
+    
+    def init( f, m, s, cn )
+        init_lazy_obj()
+        filename = f
+        mode     = m
+        cum_node_size = cn
+        add_child( s )
+    
+    virtual def get_done
+        return done_
+        
+    virtual def evaluate
+        if not filename.ends_by("\0") filename += "\0"
+        if not mode.ends_by("\0")     mode     += "\0"
+        ch := child_cast( children[0] )
+        exec_ccode_function( func, ch->data, filename, mode, ch->size, cum_node_size )
+        done_ = true
+    
+    virtual def write_to_stream( s )
+        s << "EL_W"
+
+#~
+~#
+class LazyElemListTypeElemWriter[ TE, ST ] inherits LazyObjectAncestor
+    static func := CppCompiledFunctionSet[ LazyElemListBaseCompiledFunction[ TE, ST ] ]::get_func("write_type_elem_to_file")
+    
+    filename      := ""
+    mode          := "" # w, a, ...
+    done_         := false
+    
+    def init( f, m, s )
+        init_lazy_obj()
+        filename = f
+        mode     = m
+        add_child( s )
+    
+    virtual def get_done
+        return done_
+        
+    virtual def evaluate
+        if not filename.ends_by("\0") filename += "\0"
+        if not mode.ends_by("\0")     mode     += "\0"
+        ch := child_cast( children[0] )
+        exec_ccode_function( func, ch->data, filename, mode, ch->size )
+        done_ = true
+    
+    virtual def write_to_stream( s )
+        s << "EL_TW"
+
+#~
+~#
+class LazyElemListOffsetElemWriter[ TE, ST ] inherits LazyObjectAncestor
+    static func := CppCompiledFunctionSet[ LazyElemListBaseCompiledFunction[ TE, ST ] ]::get_func("write_offset_elem_to_file")
+    
+    filename      := ""
+    mode          := "" # w, a, ...
+    off           := ST( 0 )
+    done_         := false
+    
+    def init( f, m, s, o )
+        init_lazy_obj()
+        filename = f
+        mode     = m
+        off      = o
+        add_child( s )
+    
+    virtual def get_done
+        return done_
+        
+    virtual def evaluate
+        if not filename.ends_by("\0") filename += "\0"
+        if not mode.ends_by("\0")     mode     += "\0"
+        ch := child_cast( children[0] )
+        exec_ccode_function( func, ch->data, filename, mode, ch->size, off )
+        done_ = true
+    
+    virtual def write_to_stream( s )
+        s << "EL_OW"

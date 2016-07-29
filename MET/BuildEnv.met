@@ -1,0 +1,36 @@
+
+#~
+~#
+class BuildEnv
+    CXX := "g++"
+    LD := "g++"
+    CPPPATH := Vec[String]( [ ".", "/usr/include", "/usr/local/include", "include" ] )
+    INCPATH := Vec[String]()
+    CPPFLAGS := "-g3" # -O3 -ffast-math
+    LDFLAGS := ""
+    LDPATH := Vec[String]()
+    LIBS := Vec[String]([])
+    GEN_DIR := "generated"
+    DYLIB_SUFFIX := ".so"
+    OSTYPE := get_os_type()
+    LD_SO_FLAG := "-dynamiclib" * (OSTYPE=="Darwin") or "-shared"
+    verbose := true
+
+    def make_object_from_cpp( source, target, want_so )
+        dirs := CPPPATH +++ [ GEN_DIR ]
+        so_flags := "-fPIC" * want_so
+        txt := "$CXX $(join(dirs.map(x=>"-I"+x)," ")) $so_flags $CPPFLAGS -c '$source' -o '$target'"
+        if verbose
+            print txt
+        return system( txt )
+
+    def make_lib_from_objects( sources, target, want_so ) when sources.tensor_order <= 0
+        return make_lib_from_objects( [sources], target, want_so )
+        
+    def make_lib_from_objects( sources, target, want_so, inc_path = [] )
+        dirs := LDPATH +++ [ GEN_DIR ]
+        so_flags := LD_SO_FLAG * want_so
+        txt := "$LD $(join(dirs.map(x=>"-L"+x)," ")) $(join(LIBS.map(x=>"-l"+x)," ")) $(join(inc_path.map(x=>"-I$x")," ")) $(join(sources.map(x=>"'$x'")," ")) $so_flags $LDFLAGS -o '$target'"
+        if verbose
+            print txt
+        return system( txt )

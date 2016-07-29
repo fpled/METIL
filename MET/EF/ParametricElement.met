@@ -1,0 +1,531 @@
+generate_err_func := true
+
+#~
+~#
+class GenerateMethodForParametricElement[ TE, dim ]
+    filename     := ""
+    
+    def init
+        init_using_default_values( self )
+        base_name := String( TE )
+        for name, value in TemplateAttributeExplorer( partial_instanciation TE )
+            base_name += "_$(name)_$value"
+        system("mkdir $base_generated_files 2> /dev/null") # hum
+        filename = "$base_generated_files/$base_name.$dim.met"
+        
+        must_be_generated := ( last_modification_time_or_zero_of_file_named( filename ) == Int64( 0 ) )
+        if must_be_generated
+            #
+            nb_nodes := TE::points.size
+            nvi := 0
+            if nb_nodes
+                nvi = TE::points[0].size
+            nb_vertex_nodes := 0
+            for num_node in 0 .. nb_nodes
+                if TE::node_number_is_a_vertex( num_node )
+                    nb_vertex_nodes++
+            
+            #
+            f := File( filename, "w" )
+            # basic constants
+            f <<< "static const nvi := $nvi"
+            f <<< "static const nb_nodes := $nb_nodes"
+            f <<< "static const nb_vertex_nodes := $nb_vertex_nodes"
+        
+            # symbols
+            var_inter := Vec[ Op, nvi      ]( function = symbol( "var_inter[$_0]", greek_letter(6+_0) ) )
+            val       := Vec[ Op, nb_nodes ]( function = symbol( "val[$_0]"      , "N_{$_0}"          ) )
+            val_vertex := Vec[ Op, nb_vertex_nodes ]( function = symbol( "val_vertex[$_0]"      , "N_{$_0}" ) )
+            pos_nodes := Vec[ Vec[ Op, dim ], nb_nodes ]()
+            for num_node in 0 .. nb_nodes
+                for d in 0 .. dim
+                    pos_nodes[num_node][d] = symbol( "pos_nodes[$num_node][$d]", "P_{$num_node}^{$d)}" )
+            
+            # center_of_var_inter
+            cvi := var_inter.map( self.integration( _0, var_inter, 1 ) / self.integration( 1, var_inter, 1 ) )
+            f <<< "static const center_of_var_inter := [ $(join(cvi,", ")) ]"
+            
+            # find lagrange and hierarchical shape functions for nb_nodes
+            base := Vec[ Op ]()
+            lagrange_shape_functions := Vec[ Op, nb_nodes ]()
+            hierarchical_shape_functions := Vec[ Op, nb_nodes ]()
+            for order in 0...
+                for comb in ConstantSumList( sum = order, list_size = nvi )
+                    base.push_back( product( var_inter ^ comb ) )
+                if base.size >= nb_nodes
+                    if construct_lagrange_shape_function_using_current_base_( nb_nodes, TE::points, var_inter, lagrange_shape_functions, base ) and construct_hierarchical_shape_function_using_current_base_( nb_nodes, TE::points, var_inter, hierarchical_shape_functions, base )
+                        break
+
+            # find hierarchical shape functions for nb_vertex_nodes
+            base_for_vertex := Vec[ Op ]()
+            hierarchical_shape_functions_vertex := Vec[ Op, nb_vertex_nodes ]()
+            for order in 0...
+                for comb in ConstantSumList( sum = order, list_size = nvi )
+                    base_for_vertex.push_back( product( var_inter ^ comb ) )
+                if base_for_vertex.size >= nb_nodes
+                    if construct_hierarchical_shape_function_vertex_using_current_base_( nb_nodes, TE::points, var_inter, hierarchical_shape_functions_vertex, base_for_vertex )
+                        break
+
+            deg_max := 0
+            if generate_err_func
+                deg_max = 3
+            # find lagrange and hierarchical shape functions for generic_points
+            generic_lagrange_shape_functions := Vec[ Vec[ Op ], deg_max + 1 ]()
+            generic_hierarchical_shape_functions := Vec[ Vec[ Op ], deg_max + 1 ]()
+
+            if nvi == 3 and ( String( TE ) == "Hexa" or String( TE ) == "Hexa_20" or String( TE ) == "Hexa_27" or String( TE ) == "HexaGeneric[Int32]" )
+                # lagrange and hierarchical shape functions calculated using children of sub_nvi=2 (Bar for Hexa ones)
+                class CE[ nvi ]
+                    first := MultiPtr()
+                    second := Vec[ Vec[ Rationnal, nvi ] ]()
+                    node_nb := Vec[ Int32 ]()
+                children := Vec[ SplittedVec[ CE[ nvi ], 4 ], nvi + 1 ]()
+                get_children_rec_( children, 0, TE, TE::points, nvi, 0..TE::points.size )
+                ch := children[ 2 ][ 0 ]
+                child_var_inter := Vec[ Op, nvi-2 ]( x => symbol( "child_var_inter[$x]" ) )
+                TE_child := @ch.first
+                child_generic_lagrange_shape_functions := Vec[ Vec[ Op ], deg_max + 1 ]()
+                child_generic_hierarchical_shape_functions := Vec[ Vec[ Op ], deg_max + 1 ]()
+                for deg in 0 .. deg_max + 1
+                    child_generic_base := Vec[ Op ]()
+                    child_generic_points := TE_child::get_generic_points( max( TE_child::get_order_interpolation() ) + deg )
+                    child_generic_lagrange_shape_functions[ deg ].resize( child_generic_points.size )
+                    child_generic_hierarchical_shape_functions[ deg ].resize( child_generic_points.size )
+                    for order in 0...
+                        for comb in ConstantSumList( sum = order, list_size = nvi-2 )
+                            child_generic_base.push_back( product( child_var_inter ^ comb ) )
+                        if child_generic_base.size >= child_generic_points.size
+                            if construct_lagrange_shape_function_using_current_base_( child_generic_points.size, child_generic_points, child_var_inter, child_generic_lagrange_shape_functions[ deg ], child_generic_base ) and construct_hierarchical_shape_function_using_current_base_( child_generic_points.size, child_generic_points, child_var_inter, child_generic_hierarchical_shape_functions[ deg ], child_generic_base )
+                                break
+                    child_generic_lagrange_shape_functions_0 := child_generic_lagrange_shape_functions[ deg ].subs( child_var_inter, [ var_inter[0] ] )
+                    child_generic_lagrange_shape_functions_1 := child_generic_lagrange_shape_functions[ deg ].subs( child_var_inter, [ var_inter[1] ] )
+                    child_generic_lagrange_shape_functions_2 := child_generic_lagrange_shape_functions[ deg ].subs( child_var_inter, [ var_inter[2] ] )
+                    child_generic_hierarchical_shape_functions_0 := child_generic_hierarchical_shape_functions[ deg ].subs( child_var_inter, [ var_inter[0] ] )
+                    child_generic_hierarchical_shape_functions_1 := child_generic_hierarchical_shape_functions[ deg ].subs( child_var_inter, [ var_inter[1] ] )
+                    child_generic_hierarchical_shape_functions_2 := child_generic_hierarchical_shape_functions[ deg ].subs( child_var_inter, [ var_inter[2] ] )
+                    n := max( TE_child::get_order_interpolation() ) + deg
+                    for k in 0 .. n+1
+                        for j in 0 .. n+1
+                            for i in 0 .. n+1
+                                generic_lagrange_shape_functions[ deg ].push_back( child_generic_lagrange_shape_functions_0[ i ] * child_generic_lagrange_shape_functions_1[ j ] * child_generic_lagrange_shape_functions_2[ k ] )
+                                generic_hierarchical_shape_functions[ deg ].push_back( child_generic_hierarchical_shape_functions_0[ i ] * child_generic_hierarchical_shape_functions_1[ j ] * child_generic_hierarchical_shape_functions_2[ k ] )
+
+            else
+                for deg in 0 .. deg_max + 1
+                    generic_base := Vec[ Op ]()
+                    generic_points := TE::get_generic_points( max( TE::get_order_interpolation() ) + deg )
+                    generic_lagrange_shape_functions[ deg ].resize( generic_points.size )
+                    generic_hierarchical_shape_functions[ deg ].resize( generic_points.size )
+                    for order in 0...
+                        for comb in ConstantSumList( sum = order, list_size = nvi )
+                            generic_base.push_back( product( var_inter ^ comb ) )
+                        if generic_base.size >= generic_points.size
+                            if construct_lagrange_shape_function_using_current_base_( generic_points.size, generic_points, var_inter, generic_lagrange_shape_functions[ deg ], generic_base ) and construct_hierarchical_shape_function_using_current_base_( generic_points.size, generic_points, var_inter, generic_hierarchical_shape_functions[ deg ], generic_base )
+                                break
+
+            # interpolation
+            f <<< "#"
+            f <<< "def interpolation( var_inter, val, interpolation_base )"
+            lagrange_interp := dot( lagrange_shape_functions, val )
+            hierarchical_interp := dot( hierarchical_shape_functions, val )
+            if assumed( lagrange_interp == 0 )
+                f <<< "    if val.tensor_order==1 and val.size  return val[ 0 ]"
+                f <<< "    return 0"
+            else
+                f <<<<
+                        if interpolation_base == "lagrange"
+                            return $lagrange_interp
+                        else if interpolation_base == "hierarchical"
+                            return $hierarchical_interp
+
+            # generic interpolation
+            for deg in 0 .. deg_max + 1
+                generic_points := TE::get_generic_points( max( TE::get_order_interpolation() ) + deg )
+                generic_val := Vec[ Op, generic_points.size ]( function = symbol( "val[$_0]"      , "N_{$_0}"          ) )
+                f <<< "#"
+                f <<< "def generic_interpolation( var_inter, val, interpolation_base, deg ) when deg == $( max( TE::get_order_interpolation() ) + deg )"
+                generic_lagrange_interp := dot( generic_lagrange_shape_functions[ deg ], generic_val )
+                generic_hierarchical_interp := dot( generic_hierarchical_shape_functions[ deg ], generic_val )
+                if assumed( generic_lagrange_interp == 0 )
+                    f <<< "    if val.tensor_order==1 and val.size  return val[ 0 ]"
+                    f <<< "    return 0"
+                else
+                    f <<<<
+                            if interpolation_base == "lagrange"
+                                return $generic_lagrange_interp
+                            else if interpolation_base == "hierarchical"
+                                return $generic_hierarchical_interp
+
+            # interpolation_vertex
+            f <<< "#"
+            f <<< "def interpolation_vertex( var_inter, val_vertex )"
+            interp_vertex := dot( hierarchical_shape_functions_vertex, val_vertex )
+            if assumed( interp_vertex == 0 )
+                f <<< "    if val_vertex.tensor_order==1 and val_vertex.size  return val_vertex[ 0 ]"
+                f <<< "    return 0"
+            else
+                f << "    return " <<< interp_vertex
+
+            # pos
+            P := dot( lagrange_shape_functions, pos_nodes )
+            
+            # interpolation variables from children ones
+            class CE[ nvi ]
+                first := MultiPtr()
+                second := Vec[ Vec[ Rationnal, nvi ] ]()
+                node_nb := Vec[ Int32 ]()
+            children := Vec[ SplittedVec[ CE[ nvi ], 4 ], nvi + 1 ]()
+            get_children_rec_( children, 0, TE, TE::points, nvi, 0..TE::points.size )
+            f <<< "#"
+            f <<< "def nb_children( sub_nvi ) when sub_nvi==0"
+            f <<< "    return 1"
+            f <<< "def var_inter_from_child_var_inter( sub_nvi, num_child, child_var_inter ) when sub_nvi==0"
+            f <<< "    return child_var_inter"
+            f <<< "def type_child( sub_nvi, num_child ) when sub_nvi==0"
+            f <<< "    return $TE"
+            f <<< "def node_number_child( sub_nvi, num_child ) when sub_nvi==0"
+            f <<< "    return 0 .. $nb_nodes"
+            for n in 1 .. nvi + 1
+                f <<< "#"
+                f <<< "def nb_children( sub_nvi ) when sub_nvi==$n"
+                f <<< "    return $(children[ n ].size)"
+                for ch, cpt in children[ n ], 0...
+                    ce := ParametricElement[ @ch.first, dim ]()
+                    child_var_inter := Vec[ Op, ce.nvi ]( x => symbol( "child_var_inter[$x]" ) )
+                    ch_P := ce.interpolation( child_var_inter, ch.second, "lagrange" )
+                    f <<< "def var_inter_from_child_var_inter( sub_nvi, num_child, child_var_inter ) when sub_nvi==$n and num_child==$cpt"
+                    f <<< "    return [$(join(ch_P,","))]"
+                    f <<< "def type_child( sub_nvi, num_child ) when sub_nvi==$n and num_child==$cpt"
+                    f <<< "    return $(@ch.first)"
+                    f <<< "def node_number_child( sub_nvi, num_child ) when sub_nvi==$n and num_child==$cpt"
+                    f <<< "    return [$(join(ch.node_nb,","))]"
+            
+            # normal
+            normal := make_normal( P, var_inter )
+            f <<< "def normal( var_inter, pos_nodes )"
+            if dim == nvi + 1
+                if nvi == 0
+                    f <<< "    res := Vec[ Op, $dim ]()"
+                else
+                    f <<< "    res := Vec[ type_promote(var_inter[0],pos_nodes[0][0],mul), $dim ]()"
+                f << CodeWriter("").add( "res", normal, reassign ).to_string()
+                f <<< "    return res"
+            else
+                f <<< "    assert( 0, \"normal is defined only for nb_dim == nvi + 1\" )"
+
+            # jacobian matrix
+            jac_mat := make_jac_mat( P, var_inter )
+            f <<< "#"
+            f <<< "def jac_mat( var_inter, pos_nodes )"
+            if nvi == 0
+                f <<< "    res := Mat[ Op, Gen[ $nvi, $dim ] ]()"
+            else
+                f <<< "    res := Mat[ type_promote(var_inter[0],pos_nodes[0][0],mul), Gen[ $nvi, $dim ] ]()"
+            f << CodeWriter("").add( "res", jac_mat, reassign ).to_string()
+            f <<< "    return res"
+            
+            # jacobian
+            jac := make_jac( jac_mat )
+            f <<< "#"
+            f <<< "def jac( var_inter, pos_nodes )"
+            f << CodeWriter("").add( "res", jac, init ).to_string()
+            f <<< "    return res"
+            
+            # inv_jac_mat
+            f <<< "#"
+            f <<< "def inv_jac_mat( var_inter, pos_nodes )"
+            if nvi == dim
+                inv_jac_mat := inv_tiny( jac_mat )
+                if nvi == 0
+                    f <<< "    res := Mat[ Op, Gen[ $dim, $dim ] ]()"
+                else
+                    f <<< "    res := Mat[ type_promote(var_inter[0],pos_nodes[0][0],mul), Gen[ $dim, $dim ] ]()"
+                f << CodeWriter("").add( "res", inv_jac_mat, reassign ).to_string()
+                f <<< "    return res"
+            else
+                f <<< "    assert( 0, \"inv_jac_mat() available only when nb var inter == dim\" )"
+                
+            # measure
+            f <<< "#"
+            f <<< "def measure( var_inter, pos_nodes )"
+            f << CodeWriter("").add( "res", make_measure( var_inter, jac ), init ).to_string()
+            f <<< "    return res"
+            
+            if generate_err_func
+                # barycenter
+                G := make_barycenter( P, var_inter, jac, cvi )
+                f <<< "#"
+                f <<< "def barycenter( var_inter, pos_nodes )"
+                if nvi == 0
+                    f <<< "    res := Vec[ Op, $dim ]()"
+                else
+                    f <<< "    res := Vec[ type_promote(var_inter[0],pos_nodes[0][0],mul), $dim ]()"
+                f << CodeWriter("").add( "res", G, reassign ).to_string()
+                f <<< "    return res"
+
+                # inertia_operator
+                f <<< "#"
+                f <<< "def inertia_operator_for_barycenter( var_inter, pos_nodes )"
+                if nvi == 3
+                    f <<< "    res := Mat[ type_promote(var_inter[0],pos_nodes[0][0],mul), Gen[ $dim, $dim ] ]()"
+                    f << CodeWriter("").add( "res", make_inertia_operator( P, G, var_inter, jac ), reassign ).to_string()
+                else
+                    f << CodeWriter("").add( "res", make_inertia_operator( P, G, var_inter, jac ), init ).to_string()
+                f <<< "    return res"
+        
+        
+    #
+    def make_normal( P, var_inter )
+        nvi := var_inter.size
+        if dim != nvi + 1
+            return Void
+        #
+        if dim == 2
+            V := Vec[ Op, dim ]([
+                P[1].diff( var_inter[0] ),
+                - P[0].diff( var_inter[0] )
+            ])
+            V /= norm_2( V )
+            return V
+        # 
+        if dim == 3
+            V1 := P.diff( var_inter[0] )
+            V2 := P.diff( var_inter[1] )
+            V := Vec[ Op, dim ]( vect_prod( V1, V2 ) )
+            V /= norm_2( V )
+            return V
+        #
+        normal := Vec[ Op, dim ]( x => symbol("N_$x") )
+        normal_eqs := Vec[ Op ]()
+        mat := Mat[ Op, Gen[ dim, dim ] ]()
+        for nvi in 0 .. nvi
+            V := Vec[ Op, dim ]()
+            for d in 0 .. dim
+                V[d] = P[d].diff( var_inter[nvi] ) 
+            normal_eqs.push_back( dot( V, normal ) )
+            mat.row( nvi ) = V
+        mat.row( nvi ) = normal
+        normal_eqs.push_back( mat.det - 1 )
+        res := newton_raphson_iteration( normal_eqs, normal )
+        return res / norm_2( res )
+    
+    #
+    def make_jac_mat( P, var_inter )
+        nvi := var_inter.size
+        jac_mat := Mat[ Op, Gen[nvi,dim] ]()
+        for v in 0 .. nvi
+            for d in 0 .. dim
+                jac_mat[v,d] = P[d].diff(var_inter[v])
+        return jac_mat
+    
+    #
+    def make_jac( jac_mat )
+        if jac_mat.nb_rows == jac_mat.nb_cols
+            return jac_mat.det
+        #
+        norms := Vec[ Vec[ Op, dim ] ]()
+        n_sq2 := Vec[ Op ]()
+        for r in 0 .. jac_mat.nb_rows
+            N := jac_mat.row( r )
+            for k in 0 .. r
+                N -= dot( N, norms[ k ] ) * norms[ k ] / n_sq2[ k ]
+            norms.push_back( N )
+            n_sq2.push_back( norm_2_square( N ) )
+        p := product( n_sq2 )
+        if assumed( p == 1 ) return 1
+        return sqrt( p )
+    
+    # integration
+    def integration( expr, var_inter, jac )
+        nvi := var_inter.size
+        interval_var_inter := TE::interval_var_inter( var_inter ) 
+        res := jac * scalar_conversion( Op, expr )
+        for i in ( 0 .. nvi ).reversed
+            # info i, nvi, TE
+            # info interval_var_inter[ i ], var_inter[i], TE
+            res = integration( res, var_inter[i], interval_var_inter[i][0], interval_var_inter[i][1] )
+        return res
+    
+    #
+    def make_measure( var_inter, jac )
+        return integration( Op( 1 ), var_inter, jac )
+
+    #
+    def make_barycenter( P, var_inter, jac, cvi )
+        c := Vec[ Op, dim ]( function = x => symbol("c[$x]") )
+        barycenter_eqs := Vec[ Op, dim ]()
+        for d in 0 .. dim
+            barycenter_eqs[ d ] = integration( P[ d ] - c[ d ], var_inter, jac )
+        return Vec[ Op ]( newton_raphson_iteration( barycenter_eqs, c, P.subs( var_inter, cvi ) ) )
+    
+    #
+    def make_inertia_operator( P, O, var_inter, jac )
+        nvi := var_inter.size
+        OP := Vec[ Op, dim ]( P - O )
+        #
+        if nvi == 3
+            mat := Mat[ Op, Gen[ dim, dim ] ]()
+            u := Vec[ Op, dim ]( function = x => symbol("u_$x") )
+            V := vect_prod( OP, vect_prod( u, OP ) )
+            for d_i in 0 .. dim
+                for d_j in 0 .. dim
+                    mat[d_i,d_j] = integration( V[d_i].diff( u[d_j] ), var_inter, jac )
+            return mat
+        #
+        else
+            res := integration( dot( OP, OP ), var_inter, jac )
+            return res
+    
+    #
+    def construct_lagrange_shape_function_using_current_base_( nb_nodes, pos_nodes, var_inter, shape_functions, base )
+        if not var_inter.size
+            return true
+        sum_objective := Op( 0 )
+        bs := base.size
+        for n in 0 .. nb_nodes
+            shape_coeffs := Vec[ Op, bs ]( function = symbol("coeff[$n,$_0]","C_{$n,$_0}") )
+            shape_function := dot( shape_coeffs, base )
+            objective := Op( 0 )
+            for m in 0 .. nb_nodes
+                objective += ( shape_function.subs( var_inter, pos_nodes[m] ) - (n==m) ) ^ 2
+            sol := newton_raphson_minimize_iteration( objective, shape_coeffs )
+            shape_function = shape_function.subs( shape_coeffs, sol )
+            sum_objective += abs( objective.subs( shape_coeffs, sol ) )
+            shape_functions[ n ] = shape_function
+        return assumed( sum_objective < 1e-6 )
+    
+    #
+    def construct_hierarchical_shape_function_using_current_base_( nb_nodes, pos_nodes, var_inter, shape_functions, base )
+        if not var_inter.size
+            return true
+        sum_objective := Op( 0 )
+        bs := base.size
+        for n in 0 .. nb_nodes
+            shape_coeffs := Vec[ Op, bs ]( function = symbol("coeff[$n,$_0]","C_{$n,$_0}") )
+            shape_function := dot( shape_coeffs, base )
+            objective := Op( 0 )
+            if TE::point_is_a_vertex( pos_nodes[ n ] )
+                for m in 0 .. nb_nodes
+                    if TE::point_is_a_vertex( pos_nodes[ m ] )
+                        objective += ( shape_function.subs( var_inter, pos_nodes[m] ) - (n==m) ) ^ 2
+            else
+                if TE::point_is_on_edge( pos_nodes[ n ] )
+                    for m in 0 .. nb_nodes
+                        if TE::point_is_on_edge( pos_nodes[ m ] )
+                            objective += ( shape_function.subs( var_inter, pos_nodes[m] ) - (n==m) ) ^ 2
+                else
+                    for m in 0 .. nb_nodes
+                        objective += ( shape_function.subs( var_inter, pos_nodes[m] ) - (n==m) ) ^ 2
+            sol := newton_raphson_minimize_iteration( objective, shape_coeffs )
+            shape_function = shape_function.subs( shape_coeffs, sol )
+            sum_objective += abs( objective.subs( shape_coeffs, sol ) )
+            shape_functions[ n ] = shape_function
+        return assumed( sum_objective < 1e-6 )
+    
+    #
+    def construct_hierarchical_shape_function_vertex_using_current_base_( nb_nodes, pos_nodes, var_inter, shape_functions_vertex, base )
+        if not var_inter.size
+            return true
+        sum_objective := Op( 0 )
+        bs := base.size
+        l := 0
+        for n in 0 .. nb_nodes
+            if TE::node_number_is_a_vertex( n )
+                shape_coeffs := Vec[ Op, bs ]( function = symbol("coeff[$n,$_0]","C_{$n,$_0}") )
+                shape_function := dot( shape_coeffs, base )
+                objective := Op( 0 )
+                for m in 0 .. nb_nodes
+                    if TE::node_number_is_a_vertex( m )
+                        objective += ( shape_function.subs( var_inter, pos_nodes[m] ) - (n==m) ) ^ 2
+                sol := newton_raphson_minimize_iteration( objective, shape_coeffs )
+                shape_function = shape_function.subs( shape_coeffs, sol )
+                sum_objective += abs( objective.subs( shape_coeffs, sol ) )
+                shape_functions_vertex[ l++ ] = shape_function
+        return assumed( sum_objective < 1e-6 )
+        
+    def construct_lagrange_shape_function_using_current_base_with_PUM( nb_nodes, pos_nodes, var_inter, shape_functions, base )
+        if not var_inter.size
+            return true
+        sum_objective := Op( 0 )
+        bs := base.size
+        shape_coeffs := Vec[ Vec[ Op, bs ], nb_nodes ]()
+        shape_coeffs_flat := Vec[ Op ]( reservation = base.size * nb_nodes )
+        for n in 0 .. nb_nodes
+            shape_coeffs[ n ].init( function = symbol("coeff[$n,$_0]","C_{$n,$_0}") )
+            shape_coeffs_flat.append( shape_coeffs[ n ] )
+            shape_functions[ n ] = dot( shape_coeffs[ n ], base )
+        # objective function
+        objective := Op( 0 )
+        # 1 or 0 in pos_node
+        for n in 0 .. nb_nodes
+            for m in 0 .. nb_nodes
+                objective += ( shape_functions[ n ].subs( var_inter, pos_nodes[ m ] ) - (n==m) ) ^ 2
+        # partition of unity
+        objective += integration( ( sum( shape_functions ) - 1 ) ^ 2, var_inter, 1 )
+        # solve
+        sol := newton_raphson_minimize_iteration( objective, shape_coeffs_flat )
+        sum_objective += abs( objective.subs( shape_coeffs_flat, sol ) )
+        for n in 0 .. nb_nodes
+            # info n
+            shape_functions[ n ] = shape_functions[ n ].subs( shape_coeffs[ n ], sol[ n*bs .. (n+1)*bs ] )
+            # for m in 0 .. nb_nodes
+                # info m
+                # info shape_functions[ n ].subs( var_inter, pos_nodes[m] )
+        return assumed( sum_objective < 1e-6 )
+
+        #
+        # bs := base.size
+        # shape_coeffs := Vec[ Vec[ Op, bs ], nb_nodes ]()
+        # shape_coeffs_flat := Vec[ Op ]( reservation = base.size * nb_nodes ) # TODO -> generic flatten function
+        # for n in 0 .. nb_nodes
+            # shape_coeffs[ n ].init( function = symbol("coeff[$n,$_0]","C_{$n,$_0}") )
+            # shape_coeffs_flat.append( shape_coeffs[ n ] )
+            # shape_functions[ n ] = dot( shape_coeffs[ n ], base )
+            
+        # # objective function
+        # objective := Op()
+        # # 1 or 0 in pos_node
+        # for n in 0 .. nb_nodes
+            # for m in 0 .. nb_nodes
+                # objective += ( shape_functions[ n ].subs( var_inter, pos_nodes[ m ] ) - (n==m) ) ^ 2
+        # # independance on subparts of skin from exterior points
+        # child_var_inter := Vec[ Op, var_inter.size - 1 ]( function = symbol("child_var_inter[$_0]",greek_letter(6+_0)+"^{C}") )
+        # # for child in ref_elem.children( child_var_inter )
+            # # for n in 0 .. nb_nodes
+                # # if not ref_elem.point_is_in_children( child_var_inter, child, pos_nodes[ n ] )
+                    # # err := shape_functions[n].subs( var_inter, child.var_inter )
+                    # # objective += child.elem.integration( err ^ 2, child_var_inter )
+        # # partition of unity
+        # # objective += ref_elem.integration( ( sum( shape_functions ) - 1 ) ^ 2, var_inter )
+        
+        # # solve
+        # sol := newton_raphson_minimize_iteration( objective, shape_coeffs_flat )
+        # #
+        # for n in 0 .. nb_nodes
+            # shape_functions[n] = shape_functions[n].subs( shape_coeffs[n], sol[ n*base.size .. (n+1)*base.size ] )
+            # # info shape_functions[n].subs( var_inter[0], 0 )
+            # # for m in 0 .. nb_nodes info shape_functions[n].subs( var_inter, pos_nodes[m] )
+        # return assumed( objective.subs( shape_coeffs_flat, sol ) < 1e-6 )
+
+    #
+    def get_children_rec_( children, sub_nvi, CE, po, nvi, node_nb )
+        if sub_nvi <= nvi
+            for c in children[ sub_nvi ]
+                if @c.first == CE and c.second == po
+                    return none
+            children[ sub_nvi ].push_back( first = &CE, second = po, node_nb = node_nb )
+            for cce, cpo in CE::children
+                get_children_rec_( children, sub_nvi + 1, cce, po[cpo], nvi, node_nb[cpo] )
+
+#
+class ParametricElement[ TE, dim = Int32( TE::points[0].size ) ]
+    static const ge := GenerateMethodForParametricElement[ TE, dim ]()
+    import ge.filename
+    
+    #
+    def interval_var_inter( vi )
+        return TE::interval_var_inter( vi )
+        
+    
+    
+    

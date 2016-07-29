@@ -1,0 +1,2086 @@
+def memcpy( dst, src, n )
+    memcpy( UntypedPtr( dst ), UntypedPtr( src ), 8, n )
+
+# TODO -> hum
+def can_contain( self, v )
+    return self.tensor_order > v.tensor_order
+
+## return true if s contains v ( like 10 in range(15) )##
+def __in__( v, s ) when s.can_contain( v )
+    for c in s
+        if assumed( v == c )
+            return true
+    return false
+
+## default for -> means that __for__ has not been defined for self ##
+def __for__( self, block ) when has_size_and_select(self) pertinence -1
+    cpt := 0; while cpt < self.size
+        block( self[cpt++] )
+
+## VarArgs.map( _0 * 4 ) ##
+def map( self, function, varargs ) when is_of_type_VarArgs(self) pertinence 2
+    res := VarArgs()
+    for i in 0 .. self.nb_unnamed_arguments()
+        va := VarArgs(); va.push_unnamed( self.get_unnamed_argument_nb( i ) ); va += varargs
+        res.push_unnamed( call_with_return( function, va ) )
+    for i in 0 .. self.nb_named_arguments()
+        va := VarArgs(); va.push_unnamed( self.get_named_argument_nb( i ) ); va += varargs
+        res.push_named( self.get_name_of_named_argument_nb( i ), call_with_return( function, va ) )
+    return res
+
+## VarArgs.map( _0 * 4 ) ##
+def filter( self, function ) when is_of_type_VarArgs(self)
+    res := VarArgs()
+    for i in 0 .. self.nb_unnamed_arguments()
+        if function( self.get_unnamed_argument_nb( i ) )
+            res.push_unnamed( self.get_unnamed_argument_nb( i ) )
+    for i in 0 .. self.nb_named_arguments()
+        if function( self.get_named_argument_nb( i ) )
+            res.push_named( self.get_name_of_named_argument_nb( i ), self.get_named_argument_nb( i ) )
+    return res
+
+#~
+    generic version
+~#
+def remove_unordered_if( self, function ) when self.tensor_order == 1
+    i := 0
+    while i < self.size
+        if function( self[i] )
+            self.remove_unordered( i )
+        else
+            i++
+
+## return true if at least one item x of self checks function(x) ##
+def has_item_that_checks( self, function )
+    for i in self
+        if function( i )
+            return true
+    return false
+
+## return true if at least one item x of self equals x ##
+def has_item_equal_to( self, val )
+    for i in self
+        if i == val
+            return true
+    return false
+
+## return index of first item x \in self that checks function(x). return val_if_not_checked if there's no x to check function(x) ##
+def index_of_first_item_that_checks( self, function, val_if_not_checked = self.size )
+    for i, cpt in zip( self, 0... )
+        if function( i )
+            return cpt
+    return val_if_not_checked
+
+## return index of first item x \in self that checks function(x). return val_if_not_checked if there's no x to check function(x) ##
+def index_of_first_item_equal_to( self, val, val_if_not_checked = self.size )
+    for i, cpt in zip( self, 0... )
+        if i == val
+            return cpt
+    return val_if_not_checked
+
+## return index of first item x \in self that checks function(x). return val_if_not_checked if there's no x to check function(x) ##
+def index_of_last_item_that_checks( self, function, val_if_not_checked = self.size )
+    cpt := self.size
+    for i in self.reversed
+        cpt--
+        if function( i )
+            return cpt
+    return val_if_not_checked
+
+## return index of first item x \in self that checks function(x). return val_if_not_checked if there's no x to check function(x) ##
+def index_of_last_item_equal_to( self, val, val_if_not_checked = self.size )
+    cpt := self.size
+    for i in self.reversed
+        cpt--
+        if i == val
+            return cpt
+    return val_if_not_checked
+
+## ##
+def index_of_max_item( self )
+    old := self[0]
+    ind := 0
+    for val, i in self, 0...
+        if val > old 
+            old = val
+            ind = i
+    return ind
+## ##
+def index_of_min_item( self )
+    old := self[0]
+    ind := 0
+    for val, i in self, 0...
+        if val < old 
+            old = val
+            ind = i
+    return ind
+
+## return true if all elements x of v check Bool(x)==true ##
+def all( vec )
+    for i in vec
+        if not i
+            return false
+    return true
+
+## return true if at least one element x of v checks Bool(x)==true ##
+def any( vec )
+    for i in vec
+        if i
+            return true
+    return false
+
+#~
+    cmp_first_item_big_weight( [10,0], [1,0] ) -> 1
+    cmp_first_item_big_weight( [1,10], [1,0] ) -> 1
+    cmp_first_item_big_weight( [1,0], [10,0] ) -> -1
+    cmp_first_item_big_weight( [1,0], [1,0] ) -> 0    
+    ...    
+~#
+def cmp_first_item_big_weight( v1, v2 )
+    for i, j in v1, v2
+        if i > j
+            return 1
+        if i < j
+            return -1
+    return 0
+    
+##  ##
+def convert_if_not_of_type( value, T )
+    if are_of_same_type( value, partial_instanciation T )
+        return value
+    return T( value )
+
+#~
+    nb_sub_element_of_flatten_list( 10 ) -> 1
+    nb_sub_element_of_flatten_list( [10 20] ) -> 2
+    nb_sub_element_of_flatten_list( [[21 1],[21 2 4]] ) -> 5
+    ...
+~#
+def nb_sub_element_of_flatten_list( l ) when l.tensor_order <= 0
+    return 1
+def nb_sub_element_of_flatten_list( l )
+    res := SizeType( 0 )
+    for i in l.values
+        res += nb_sub_element_of_flatten_list( i )
+    return res
+
+#~
+    flatten( [[21 1],[21 2 4]] ) -> [ 21 1 21 2 4 ]
+~#
+def flatten( l, res ) when l.tensor_order <= 0
+    res.push_back( l )
+def flatten( l, res )
+    for v in l
+        flatten( v, res )
+def flatten( l )
+    res := Vec[ SubTypeFlatten( l ) ]() # hum !!
+    flatten( l, res )
+    return res
+
+def SubTypeFlatten( l ) when l.tensor_order <= 0
+    return l.type
+def SubTypeFlatten( l )
+    for v in l
+        r := SubTypeFlatten( v )
+        if r != None
+            return r # HUM !!!
+    return None
+
+## reduction( ( 1, 2, 3 ), add ) -> 6 ##
+def reduction( vec, function, default_value ) when vec.tensor_order==1
+    if not vec.size
+        return default_value
+    # T := type_promote( vec, function )
+    # res := convert_if_not_of_type( vec.first_item, T )
+    T := type_promote( vec.first_item, vec.first_item, function )
+    res := T( vec.first_item )
+    for i in 1 .. vec.size
+        res = function( res, vec[i] )
+    return res
+
+## reduction( [], ..., 1 ) -> 1 ##
+def reduction( vec, function, default_value ) when vec.tensor_order==0
+    return default_value
+    
+## accumulation( make_varargs( 1, 2, 3 ), add ) -> 1 3 6 ##
+class Accumulation[pre,first_val]
+    static const tensor_order := 1
+    
+    op := InternalVariable() # we don't use Def because interpreter would be confused about store_in_inst and so on
+    ve := InternalVariable() # vector
+    
+    def init( vec, function )  ve.init_using_var( vec ); op.init_using_var( function )
+    def get_size               return ve->size
+    def select(n)
+        T := type_promote( @ve, @op )
+        tmp := T( first_val ) # TODO ...
+        if pre
+            tmp += ve->select(0)
+        for v, cpt in @ve, 0 .. n
+            tmp = (@op)( tmp, v )
+        return tmp
+    def __for__( block )
+        T := type_promote( @ve, @op )
+        tmp := T( first_val ) # TODO ...
+        if pre
+            tmp += ve->select(0)
+        for v in @ve
+            block( tmp )
+            tmp = (@op)( tmp, v )
+        
+## accumulation( make_varargs( 1, 2, 3 ), add ) -> 0 1 3 ##
+def accumulation( vec, function = add, first_val = 0 )  return Accumulation[false,first_val]( vec, function )
+
+## pre_accumulation( make_varargs( 1, 2, 3 ), add ) -> 1 3 6 ##
+def pre_accumulation( vec, function = add, first_val = 0 )  return Accumulation[true,first_val]( vec, function )
+    
+## sum( make_varargs( 1, 2, 3 ) ) -> 6 ##
+def sum( vec, default_value = 0 )       return reduction( vec, add, default_value )
+
+## mean( [1,2,4] ) -> 2.33 ##
+def mean( vec, default_value = 0 )      return Float64( sum( vec ) / vec.size )
+
+## variance( [1,2,4] ) -> 1.556 ##
+def variance( vec, default_value = 0 )             return mean( ( mean(vec) - vec ) ^ 2 )
+
+## standard_deviation( [1,2,4] ) -> 1.247 ##
+def standard_deviation( vec, default_value = 0 )   return sqrt( variance( vec, default_value ) )
+
+## dot( [1,2,3], [1,0,4] ) -> 13 ##
+def dot( v1, v2, default_value = 0 )   return sum( v1 * v2, default_value )
+
+## vect_prod( [1,2,3], [1,0,4] ) -> [8,-1,-2] ##
+def vect_prod( v1, v2 ) when v1.size==3 and v2.size==3
+   return Vec[ type_promote( partial_instanciation v1.T, partial_instanciation v2.T, mul ) ]( [ v1[1]*v2[2]-v1[2]*v2[1], v1[2]*v2[0]-v1[0]*v2[2], v1[0]*v2[1]-v1[1]*v2[0] ] )
+
+## vect_prod( [1,2], [3,4] ) -> -2 ##
+def vect_prod( v1, v2 ) when v1.size==2 and v2.size==2
+   return v1[0]*v2[1]-v1[1]*v2[0]
+
+## product( [1,2,4] ) -> 8 ##
+def product( vec, default_value = 1 )  return reduction( vec, mul, default_value )
+
+## min( 1, 2, 3 ) -> 1 ##
+def min( vec, default_value = 0 ) when vec.tensor_order == 1  pertinence -1  return reduction( vec, min, default_value )
+
+## max( 1, 2, 3 ) -> 3 ##
+def max( vec, default_value = 0 ) when vec.tensor_order == 1  pertinence -1  return reduction( vec, max, default_value )
+
+## max( [1,2,3], [1,0,4] ) -> [1,2,4] ##
+def max( a, b ) when a.tensor_order==1 and b.tensor_order==1
+    res := Vec[ type_promote_list( a.sub_types, b.sub_types, reassign, reassign ), min( a.static_size, b.static_size ) ]( size = min( a.size, b.size ) )
+    for r, va, vb in res, a, b
+        r = max( va, vb )
+    return res
+## min( [1,2,3], [1,0,4] ) -> [1,0,3] ##
+def min( a, b ) when a.tensor_order==1 and b.tensor_order==1
+    res := Vec[ type_promote_list( a.sub_types, b.sub_types, reassign, reassign ), min( a.static_size, b.static_size ) ]( size = min( a.size, b.size ) )
+    for r, va, vb in res, a, b
+        r = min( va, vb )
+    return res
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+
+class SelectVec
+    static const is_a_vector := true
+    vec := InternalVariable()
+    selection := InternalVariable()
+    def init( vec_, selection_ )
+        vec.init_using_var( vec_ ); selection.init_using_var( selection_ )
+    def reassign( vec ) when vec.tensor_order == 1
+        for r, v in self, vec
+            r = v
+    def get_tensor_order                return selection->tensor_order
+    def get_size                        return selection->size
+    def select( n )       when n.tensor_order <= 0 pertinence 2
+        return vec->select( selection->select(n) )
+    def select( varargs ) pertinence 1  return select( varargs )
+    def get_sub_types                   return vec->sub_types
+    def __for__( block )
+        for i in @selection
+            block( vec->select(i) )
+    def get_T
+        return vec->T
+    def get_values
+        return self
+
+## ##
+def select( self, vec ) when self.tensor_order==1 and vec.tensor_order > 0 pertinence 3
+    return SelectVec( self, vec )
+## ##
+def select( self, vec ) when self.tensor_order==1 and vec.is_an_OpenRange pertinence 4
+    return SelectVec( self, range( vec.begin, vec.begin + ( self.size - vec.begin ) // vec.increment, vec.increment ) )
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+
+##
+    Ex : 0 .. 10 -> 0 1 2 3 4 5 6 7 8 9
+    General def is : b, b+1*i, b+2*i, ... b+n*i where n is larger x such as b+x*i < e
+##
+class Range( T_begin=Int32, T_end=T_begin, T_increment=T_begin )
+    static const tensor_order := 1
+    static const is_a_vector := true
+    property is_a_Range_vector
+    static const T := T_begin
+    begin     ~= T_begin
+    end       ~= T_end
+    increment ~= T_increment
+    def init( begin_, end_, increment_ )  begin.init( begin_ );  end.init( end_ );  increment.init( increment_ )
+    def reassign( r ) when r.is_a_Range_vector
+        begin.init( r.begin );  end.init( r.end );  increment.init( r.increment )
+    def destroy                           begin.destroy();       end.destroy();     increment.destroy()
+    def get_size                          return Int32( (end-begin) // increment )
+    def select( n )                       return begin + n * increment
+    def get_reversed                      return ReverseRange[ type_of(self) ]( self )
+    def __for__( block )
+        cpt := begin
+        if increment > 0
+            while cpt < end
+                block( cpt )
+                cpt += increment
+        else
+            while cpt > end
+                block( cpt )
+                cpt += increment
+        
+## range(5,10,2) -> 5 7 9 ##
+def range( begin, end, increment = 1 )
+    if type_of(begin) == Bool
+        return Range[type_of(end),type_of(end),type_of(increment)]( begin, end, increment )
+    return Range[type_of(begin),type_of(end),type_of(increment)]( begin, end, increment )
+
+## range(10) -> 0 1 2 3 4 5 6 7 8 9 ##
+def range( end ) return range( end.type(0), end, 1 )
+
+#~ ~#
+def max( r ) when r.is_a_Range_vector pertinence 10
+    return r.begin + ( r.size - 1 ) * r.increment
+#~ ~#
+def min( v ) when v.is_a_Range_vector pertinence 10
+    return r.begin
+
+## ##
+class ReverseRange( R )
+    static const tensor_order := 1
+    static const is_a_vector := true
+    
+    r ~= R
+    def init( r_ )                        r.init( r_ )
+    def destroy                           r.destroy()
+    def get_size                          return r.size
+    def select( n )                       return r.select( r.size - 1 - n )
+    def get_reversed                      return r
+    def __for__( block )
+        cpt := r.begin + ( (r.end-r.begin) // r.increment - 1 ) * r.increment
+        if r.increment > 0
+            while cpt >= r.begin
+                block( cpt )
+                cpt -= r.increment
+        else
+            while cpt <= r.begin
+                block( cpt )
+                cpt -= r.increment
+        
+## deault reverse class for vectors with size and select. ##
+class ReversedVec
+    static const tensor_order := 1
+    static const is_a_vector := true
+    vec := InternalVariable()
+    def init( v )         vec.init_using_var( v )
+    def get_size          return vec->size
+    def select( n )       return vec->select( vec->size - 1 - n )
+    def get_reversed      return @vec
+    def get_sub_types     return vec->sub_types
+    def __for__( block )
+        cpt := vec->size
+        while cpt--
+            block( vec->select( cpt ) )
+
+## default reversed procedure : uses size and select ##
+def get_reversed(self) when has_size_and_select(self) pertinence 0  return ReversedVec( self )
+        
+##
+    Ex : 0 .. 10 -> 0 1 2 3 4 5 6 7 8 9
+    General def is : b, b+1*i, b+2*i, ... b+n*i where n is larger x such as b+x*i < e
+##
+class OpenRange( T_begin=Int32, T_increment=T_begin )
+    static const tensor_order := 1
+    static const is_a_vector := true
+    property is_an_OpenRange
+    
+    begin     ~= T_begin
+    increment ~= T_increment
+    def init( begin_, increment_ )  begin.init( begin_ );  increment.init( increment_ )
+    def destroy                     begin.destroy();       increment.destroy()
+    def get_size                    return begin.max_representable
+    def select( n )                 return begin + n * increment
+    def __for__( block )
+        cpt := begin
+        while true
+            block( cpt )
+            cpt += increment
+## ##
+def triple_dots( begin, increment = 1 )
+    return OpenRange[type_of(begin),type_of(increment)]( begin, increment )
+
+
+##
+   [a,b] +++ [c,d] -> [a,b,c,d]
+   concatenate( [a,b], [c,d] ) -> [a,b,c,d]
+##
+class Concatenate
+    static const tensor_order := 1
+    property is_a_vector
+    property is_a_Concatenate_vector
+    
+    lists ~= VarArgs
+    def init( va ) when not va.is_a_Concatenate_vector
+        lists.init( va )
+    def destroy
+        lists.destroy()
+    def get_size
+        res := SizeType( 0 )
+        for l in lists
+            res += l.size
+        return res # sum( lists.map( _0.size ) )
+    def get_values
+        return self
+    def map( function ) 
+        res := Concatenate()
+        res.lists.init()
+        for l in lists
+            res.lists.push_unnamed( l.map(function) )
+        return res
+    def select( n ) when n.tensor_order <= 0
+        nc := n
+        for l in lists
+            if nc < l.size
+                return l[ nc ]
+            nc -= l.size
+    def __for__( block )
+        for l in lists
+            for v in l
+                block( v )
+    def get_sub_types
+        res := VarArgs()
+        for l in lists
+            for s in l.sub_types
+                res.push_unnamed( s )
+        return res
+                
+## [a,b] +++ [c,d] -> [a,b,c,d] ##
+def concatenate( varargs )   return Concatenate( varargs )
+
+##
+   zip( [a,b], [c,d] ) -> [ (a,c), (b,d) ]
+##
+class Zip
+    static const tensor_order := 1
+    static const is_a_vector := true
+    
+    lists ~= VarArgs
+    def init( va )        lists.init( va )
+    def destroy           lists.destroy()
+    def get_size          return min( lists.map( _0.size ), default_value = 0 )
+    def __for__( block )
+        if lists.size == 1
+            for v in lists[0]
+                block( make_varargs(v) )
+        else 
+            s := self.get_size()
+            for v in 0 .. s
+                va_ := VarArgs()
+                for i in 0 .. lists.nb_unnamed_arguments()
+                    va_.push_unnamed( lists[i][v] )
+                block( va_ )
+    def select( n )
+        res := VarArgs()
+        for l in lists
+            res.push_unnamed( l[n] )
+        return res
+        
+## zip( [a,b], [c,d] ) -> [ (a,c), (b,d) ] ##
+def zip( varargs )   return Zip( varargs )
+
+## ListWithFlagTrueOnLastItem( [1,2,3] ) -> [(1,false),(2,false),(3,true)] ##
+class ListWithFlagTrueOnLastItem
+    static const tensor_order := 1
+    static const is_a_vector := true
+    
+    l := InternalVariable() # list
+    def init( lst )     l.init_using_var( lst )
+    def get_size        return l->size
+    def select( n )     return make_varargs( l->select(n), n == l->size - 1 )
+    def __for__( block )
+        cpt := l->size
+        for i in @l
+            block( make_varargs( i, (cpt-- == 1) ) )
+
+## ##
+def list_with_flag_true_on_last_item( lst ) return ListWithFlagTrueOnLastItem( lst )
+
+## join( [1,2,3], 75 ) -> [1,75,2,75,3] ##
+class Intercalated
+    static const is_a_vector := true
+    l := InternalVariable() # list
+    s := InternalVariable() # separator
+    def init( list, separator )  l.init_using_var( list ); s.init_using_var( separator )
+    def get_size
+        if l->size
+            return l->size * 2 - 1
+        return 0
+    def select( n )
+        if odd( n )
+            return @s
+        return l->select( n // 2 )
+    def __for__( block )
+        for i, flag in ListWithFlagTrueOnLastItem( @l )
+            block( i )
+            if not flag  block( @s )
+
+## join( [1,2,3], 75 ) -> [1,75,2,75,3] ##
+def intercalated( list, separator ) return Intercalated( list, separator )
+    
+## ##
+class Rectilinear
+    static const tensor_order := 1
+    va := VarArgs() # vectors
+    def get_size    return product( va.map( _0.size ) )
+    def toto_select( lst, n ) return lst[n]
+    def select( n, d=0 )
+        if d == va.size
+            return VarArgs()
+        res := select( n // va[d].size, d + 1 )
+        res.push_unnamed( va[d][ n % va[d].size ] )
+        return res
+    def __for__( block, b = VarArgs() ) # recursive construction
+        if b.size < va.size
+            for i in va[b.size]
+                t := b; t.push_unnamed( i )
+                __for__( block, t )
+        else
+            block( b )
+# rectilinear( [1,2], [3,4] ) -> 1 3, 1 4, 2 3, 2 4
+def rectilinear( varargs )
+    return Rectilinear( va = varargs )
+
+# rectilinear( [[1,2], [3,4]] ) -> 1 3, 1 4, 2 3, 2 4
+def rectilinear( lst ) when lst.tensor_order == 1
+    res := Rectilinear()
+    for i in lst
+        if i.tensor_order == 1
+            res.va.push_unnamed( i )
+        else
+            res.va.push_unnamed( 0 .. i )
+    return res
+
+# rectilinear( [3,4], 2 ) -> 3 3, 3 4, 4 3, 4 4
+def rectilinear( lst, n ) when lst.tensor_order == 1 and n.is_a_number
+    res := Rectilinear()
+    for i in 0 .. n
+        res.va.push_unnamed( lst )
+    return res
+
+## ##
+class TriInfIterator
+    static const tensor_order := 1
+    va := VarArgs() # vectors
+    def get_size    return SizeType( product( ( 0 .. va.size ).map( Rationnal( va[_0].size + _0 ) ) ) / factorial( Rationnal( va.size ) ) )
+    def toto_select( lst, n ) return lst[n]
+    def select( n ) return va.map( toto_select(_0,n) )
+    def __for__( block, b = VarArgs(), cpt_parent = SizeType::max_representable ) # recursive construction
+        if b.size < va.size
+            cpt := 0
+            for i in va[b.size]
+                t := b; t.push_unnamed( i )
+                __for__( block, t, cpt )
+                if cpt++ >= cpt_parent
+                    break
+        else
+            block( b )
+
+# 
+def tri_inf( varargs )
+    return TriInfIterator( va = varargs )
+
+# tri_inf
+def tri_inf( lst ) when lst.tensor_order == 1
+    res := TriInfIterator()
+    for i in lst
+        res.va.push_unnamed( i )
+    return res
+
+# tri_inf
+def tri_inf( lst, n ) when lst.tensor_order == 1 and n.is_a_number
+    res := TriInfIterator()
+    for i in 0 .. n
+        res.va.push_unnamed( lst )
+    return res
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+#~
+for i in PermutationList(3) info i
+
+gives
+
+i -> 0 1 2
+i -> 0 2 1
+i -> 1 0 2
+i -> 1 2 0
+i -> 2 0 1
+i -> 2 1 0
+
+~#
+class PermutationList
+    beg := Vec[Int32]()
+    end := Vec[Int32]()
+    def init( nb_values )
+        beg.init()
+        end.init( 0 .. nb_values )
+    def __for__( block )
+        if end.size
+            for i in 0 .. end.size
+                n := PermutationList()
+                n.beg = beg +++ [ end[i] ]
+                n.end = end[ 0 .. i ] +++ end[ i+1... ]
+                for p in n
+                    block( p )
+        else
+            block( beg )
+
+#~
+for i in CombinatorialList(3,4) info i
+
+gives
+
+i -> 0 1 2 
+i -> 0 1 3 
+i -> 0 2 3 
+i -> 1 2 3 
+
+~#
+class CombinatorialList
+    n := 0
+    s := 0
+    def init( nb_values, list_size )
+        n.init( nb_values )
+        s.init( list_size )
+    def __for__( block )
+        if s >= n
+            it := Vec[Int32]( 0 .. n )
+            while true
+                block(it)
+                for i in 0 .. n
+                    if i == n-1
+                        it[i]++
+                        if it[i] == s
+                            return None
+                        break
+                    if it[i]+1 < it[i+1]
+                        it[i]++
+                        break
+
+
+#~
+for l in ConstantSumList( sum=4, list_size=2 )
+    info l
+
+gives
+
+l -> 4 0 
+l -> 3 1 
+l -> 2 2 
+l -> 1 3 
+l -> 0 4 
+
+~#
+class ConstantSumList
+    s := 0 # sum
+    n := 0 # list size
+    def init( sum, list_size )
+        s.init( sum )
+        n.init( list_size )
+    def __for__( block )
+        for i in tri_inf( 0 .. n, s )
+            res := Vec[ Int32, n ]( default_value = 0 )
+            res[ i ]++
+            block( res )
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+
+## Ex : [1,2]+["toto","tata"] -> VecOp with refs on the two vector and operation add equivalent to ["1toto","2tata"] ##
+class VecOp
+    static const tensor_order := 1
+    property is_a_vector, is_a_VecOp
+    
+    op := InternalVariable() # we don't use Def because interpreter would be confused about store_in_inst and so on
+    va := VarArgs() # vectors
+    
+    def init( function, varargs ) when varargs.size
+        op.init_using_var( function )
+        va.init( varargs )
+        
+    def get_values
+        return self
+        
+    def get_T
+        if va.size == 1
+            return type_promote( partial_instanciation va[0].T, @op )
+        return type_promote( partial_instanciation va[0].T, partial_instanciation va[1].T, @op )
+        
+    def reassign( v ) when v.is_a_VecOp pertinence 2
+        # assert( 0, "Reassigning a VecOp is forbidden." )
+        va = v.make_cp_va()
+        # nv := VarArgs()
+        # for i in v.va
+            # n := i
+            # nv.push_unnamed( n )
+        # va = nv
+        op = v.op
+    
+    def make_cp_va
+        nv := VarArgs()
+        for i in va
+            if i.type == VecOp
+                n := VecOp()
+                n.op = i.op
+                n.va = i.make_cp_va()
+                nv.push_unnamed( n )
+            else
+                nv.push_unnamed( i )
+        return nv
+    # def subs_rec( nv )
+        # for i in 0 .. va.size
+            # if pointer_on( va[i] ) == pointer_on( self )
+                # va.change_variable( i, nv )
+            # # else if va[i].type == VecOp
+                # va[i].subs_rec(  )
+    def get_size_evaluation_costs_a_lot
+        return true # max( va.map(_0.size_evaluation_costs_a_lot) )
+    def get_size
+        if va.size
+            return va[0].size
+        # if va.size == 2
+            # return min( va[0].size, va[1].size )
+        # if va.size == 3
+            # return min( va[0].size, va[1].size, va[2].size )
+        return 0
+    def get_sizes
+        return [ get_size() ]
+    def select( n )
+        v := VarArgs()
+        for vec in va
+            v.push_unnamed( vec[n] )
+        return call_with_return( @op, v )
+    def __for__( block )
+        for v in call_with_return( zip, va )
+            block( call_with_return( @op, v ) )
+    def conversion_to( b ) when is_of_type_Bool(b) and @op == equal
+        b.init( va[0].size == va[1].size and all( self ) )
+    def conversion_to( b ) when is_of_type_Bool(b) and @op == not_equal
+        b.init( va[0].size != va[1].size or any( self ) )
+    def conversion_to( b ) when is_of_type_Bool(b)
+        assert( 0, "Direct conversion of a vector to a Bool is illegal. One should use an operator like 'any', 'all'..." )
+        b.init( Error() )
+    def get_sub_types
+        if va.size == 1
+            return va.sub_types
+        if va.size == 2
+            res := VarArgs()
+            for i in va[0].sub_types
+                for j in va[1].sub_types
+                    res.push_unnamed( type_promote( partial_instanciation i, partial_instanciation j, @op ) )
+            return res
+        assert( 0, "TODO" )
+
+## general definition of map ##
+def map( self, function ) when ( self.tensor_order == 1 or self.is_a_String ) and not self.is_an_array pertinence 0
+    res := VecOp()
+    res.op.init_using_var( function )
+    res.va.push_unnamed( self )
+    return res
+
+# ------------------------------------------------------------------------------------------------------------------------------------------------
+
+## Ex : [1,2]+["toto","tata"] -> VecOp with refs on the two vector and operation add equivalent to ["1toto","2tata"] ##
+class VecFilter
+    static const tensor_order := 1
+    static const size_evaluation_costs_a_lot := true
+    property is_a_vector, is_a_VecFilter
+    
+    op := InternalVariable() # we don't use Def because interpreter would be confused about store_in_inst and so on
+    va := InternalVariable() # vector
+    
+    def init( function, vector )
+        op.init_using_var( function )
+        va.init_using_var( vector   )
+        
+    def get_values
+        return self
+        
+    def get_T
+        return va.T
+        
+    def __for__( block )
+        for val in @va
+            if (@op)( val )
+                block( val )
+
+
+## general definition of filter ##
+def filter( self, function ) when ( self.tensor_order == 1 or self.is_a_String ) and not self.is_an_array pertinence 0
+    res := VecFilter()
+    res.op.init_using_var( function )
+    res.va.init_using_var( self )
+    return res
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------------------
+
+## vector with all identical values ##
+class VecCst
+    property is_a_vector
+    static const tensor_order := 1
+    val := InternalVariable()
+    size := 0
+    
+    def init( s, value )        size = s; val.init_using_var( value )
+    def reassign( s ) when s.tensor_order == 1
+        assert( s.size, "VecCst.reassign( s ) with s.size==0 if forbiden" )
+        assert( all(s==s[0]), "VecCst.reassign( non const vec ) if forbiden" )
+        val = s[0]
+    def select( n )             return @val
+    def __for__( block )        cpt := 0; while cpt++ < size  block( @val )
+    def get_sub_types           return [ val->type ]
+    def get_T                   return val->type
+
+## vector with all identical values ##
+class VecCst[ value ]
+    property is_a_vector
+    static const tensor_order := 1
+    size := 0
+    
+    def init( s ) when s.is_a_number
+        size = s
+    def select( n )             return value
+    def __for__( block )        cpt := 0; while cpt++ < size  block( value )
+    def get_T                   return value.type
+    
+## ##
+def vec_cst( size, val )  return VecCst( size, val )
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+## vector with false expect on 1 index ##
+class VecDirac
+    property is_a_vector
+    static const tensor_order := 1
+    ind := 0
+    
+    def init( i ) when i.tensor_order <= 0
+        ind.init( i )
+    def select( n )             return n == ind
+    def get_sub_types           return [ Bool ]
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+## T must be a Def. ##
+def __uninitialised_vec__( T, size )
+    return __uninitialised_vec_using_partial_instanciation__( partial_instanciation T, size )
+
+def type_promote( a, b, op ) when a.is_a_vec_of_static_size and b.tensor_order <= 0 pertinence 1
+    return Vec[ type_promote( partial_instanciation a.T, b, op ), a.static_size ]
+def type_promote( b, a, op ) when a.is_a_vec_of_static_size and b.tensor_order <= 0 pertinence 1
+    return Vec[ type_promote( b, partial_instanciation a.T, op ), a.static_size ]
+
+##  Simple static size vector ##
+class Vec[ T, static_size=-1, ST=Int32 ] when static_size >= 0
+    static const tensor_order := 1
+    # static const size := static_size
+    property is_a_vector
+    property is_a_vec_of_static_size
+    property has_static_sizes
+    static const sub_type := T
+    static def EqTypeWithScalarType( TO ) return Vec[ TO, static_size, ST ]
+    static const does_not_need_destroy := T::does_not_need_destroy
+    
+    data := __uninitialised_vec_using_partial_instanciation__( partial_instanciation T, static_size )
+    
+    def get_size         return static_size
+    
+    def get_static_sizes return [ static_size ]
+    
+    def get_sizes        return [ static_size ]
+    
+    def get_scalar_type  return T
+        
+    def get_sub_types
+        return [ T ]
+    
+    def reassign_size( ns )  resize( ns )
+    
+    def resize( ns )         assert( ns == static_size, "changing size of static sized vector if forbidden." )
+    
+    def init
+        cpt := 0; while cpt < static_size  select( cpt++ ).init() # init sub elements
+    
+    def destroy 
+        cpt := static_size; while cpt-- select( cpt ).destroy() # destroy sub elements
+    
+    def init( vector, default_value ) when vector.tensor_order == 1 and vector.size <= static_size pertinence 1 #  init with a vector and a default_value to complete if necessary
+        cpt := 0; for i in vector  __get_data_in_static_vec__( data, cpt++ ).init( i )
+        while cpt < static_size    __get_data_in_static_vec__( data, cpt++ ).init( default_value )
+    
+    def init( values ) pertinence -2
+        for v, i in values, 0...
+            select( i ).init( v )
+    
+    def reassign( vector ) when vector.tensor_order == 1 pertinence 2 #
+        assert( vector.size == static_size, "size of vector to initialise is fixed and does not correspond ($(vector.size) != $(static_size))." )
+        cpt := 0; for i in vector  __get_data_in_static_vec__( data, cpt++ ).reassign( i )
+    
+    def reassign( value ) pertinence 1 #
+        for i in self
+            i = value
+    
+    def reassign_values( value )
+        for i in self
+            i = value
+    
+    def get_begin
+        return &select(0)
+    
+    def get_end
+        return &select(static_size)
+    
+    def get_front
+        return select( 0 )
+    
+    def get_back
+        return select( static_size-1 )
+    
+    def get_values
+        return self
+    
+    def init( vector ) when vector.tensor_order == 1 pertinence 2 #
+        assert( vector.size == static_size, "size of vector to initialise is fixed and does not correspond ($(vector.size) != $(static_size))." )
+        cpt := 0; for i in vector  __get_data_in_static_vec__( data, cpt++ ).init( i )
+    
+    # def init( vector, default_value ) when vector.tensor_order == 1 pertinence 2 #
+        # for i in 0 .. min( vector.size, size )
+            # self[ i ] = vector[i]
+        # for i in vector.size .. size
+            # self[ i ] = default_value
+    
+    # def init( dummy_variable ) pertinence 1.5 # illegal. occurs only if dummy_variable.tensor_order != 1
+        # assert( 0, "Vec[].init( something ) is illegal. Use init( size=0, reservation=size ) constructor." )
+    
+    def init( default_value ) pertinence 1.5 # vector with initialised with all values == default_value
+        cpt := 0; while cpt < static_size  __get_data_in_static_vec__( data, cpt++ ).init( default_value )
+    
+    def init( function, size = static_size ) when is_of_type_Lambda(function) pertinence 2 # vector with function(index)
+        assert( size == static_size, "size == static_size" )
+        cpt := 0; while cpt < static_size
+            select( cpt ).init( function( cpt ) )
+            cpt++
+    
+    def init( function, size = static_size ) # vector with function(index)
+        assert( size == static_size, "size == static_size" )
+        cpt := 0; while cpt < static_size
+            select( cpt ).init( function( cpt ) )
+            cpt++
+    
+    def init( size, default_value ) pertinence 1 # vector with specified size and reservation, initialised with default_value
+        assert( size == static_size, "can't change the size of a static sized vector (you want $size be we have $static_size)" )
+        init( default_value = default_value )
+    
+    def init( size ) pertinence 1 # vector with specified size and reservation, initialised with default_value
+        assert( size == static_size, "can't change the size of a static sized vector (you want $size be we have $static_size)" )
+        cpt := 0; while cpt < static_size  __get_data_in_static_vec__( data, cpt++ ).init()
+    
+    def __for__( block )
+        cpt := 0; while cpt < static_size  block( __get_data_in_static_vec__( data, cpt++ ) )
+        
+    def select( i ) when i.tensor_order <= 0
+        assert( i < static_size, "indice > size ( $i > $static_size ) in vec of type $T" )
+        return __get_data_in_static_vec__( data, Int32(i) )
+    
+    def nb_attributes
+        return static_size
+        
+    def attribute_nb( n )
+        return select( n )
+        
+    def name_attribute_nb( n )
+        return "data[$n]"
+        
+    def get_additional_cpp_methods
+        return "
+    ST size() const { return $static_size; }
+    ST reserved() const { return $static_size; }
+    const T &operator[]( ST i ) const { return data_[ i ]; }
+    T &operator[]( ST i ) { return data_[ i ]; }
+    const T *ptr() const { return data_; }
+    T *ptr() { return data_; }
+    const T *begin() const { return data_; }
+    T *begin() { return data_; }
+    const T *end() const { return data_ + $static_size; }
+    T *end() { return data_ + $static_size; }
+    const T &back() const { return data_[$static_size-1]; }
+    T &back() { return data_[$static_size-1]; }
+        "
+
+
+## Simple dynamic size vector ##
+class Vec[ T, static_size=-1, ST=Int32, T_alignement = 0 ] when static_size < 0
+    static const tensor_order := 1
+    static const is_a_vector := true
+    static def EqTypeWithScalarType( TO ) return Vec[ TO, static_size, ST ]
+    static const pt ~= T
+    static const item_does_not_need_destroy := false # pt.does_not_need_destroy
+    static needs_item_init := not ( T in [ Float32, Float64, Int32, Int64 ] )
+    static const sub_type := T
+    if T.is_a_vec_of_static_size
+        needs_item_init = not ( T::T in [ Float32, Float64, Int32, Int64 ] )
+    
+    data_ ~= Ptr[ T ]
+    size_ ~= ST
+    reserved_ ~= ST
+   
+    def get_size
+        return size_
+    
+    def get_sizes
+        return [ size_ ]
+        
+    def get_sub_types
+        return [ T ]
+    
+    def get_reserved
+        res := reserved_
+        return res
+        
+    def reassign_size( ns )
+        resize( ns )
+        
+    def init( size=0, reservation=size ) pertinence 1 # uninitialised vector with specified size and reservation
+        size_.init( size ); reserved_.init( reservation )
+        if reserved_
+            data_.init( allocate( T, reserved_, T_alignement ) )
+            if needs_item_init
+                for i in 0 .. size
+                    data_[i].init()
+    
+    def resize_without_init( size, reservation = size )
+        size_.init( size ); reserved_.init( reservation )
+        if reserved_
+            data_.init( allocate( T, reserved_, T_alignement ) )
+    
+    def init( dummy_variable ) pertinence 1.5 # illegal. occurs only if dummy_variable.tensor_order != 1
+        assert( 0, "Vec[].init( something ) is illegal. Use init( size, reservation=size ) or init( size, default_value )  or init( size, function ) or init( vector ) when vector.tensor_order == 1." )
+    
+    def init( size, default_value ) # vector with specified size and reservation, initialised with default_value
+        size_.init( size ); reserved_.init( size )
+        if reserved_
+            data_.init( allocate( T, reserved_, T_alignement ) )
+            cpt := 0; while cpt < size_ select( cpt++ ).init( default_value )
+    
+    def init( size, function ) # vector with specified size and reservation, initialised with default_value
+        init( size = size )
+        for v in 0 .. size
+            self[ v ].init( function( v ) )
+    
+    def init( size, data ) # non owned vec
+        data_.init( data )
+        size_.init( size )
+        reserved_.init( 0 )
+    
+    def init( vector ) when vector.tensor_order == 1 # constructor from another vector (of any kind)
+        if vector.size_evaluation_costs_a_lot
+            init()
+            for i in vector
+                push_back( i )
+        else
+            size_.init( vector.size ); reserved_.init( size_ )
+            if reserved_
+                data_.init( allocate( T, reserved_, T_alignement ) )
+                cpt := 0; for i in vector select( cpt++ ).init( i )
+    
+    def init( vector ) when vector.is_a_LittleHeterogeneousArray and vector.tensor_order == 0
+        init()
+    
+    def init( values ) pertinence -2
+        self.init( vector = values )
+    
+    def reassign( vector ) when vector.tensor_order == 1 # 
+        if vector.size_evaluation_costs_a_lot or reserved_ < vector.size
+            destroy()
+            init( vector )
+        else
+            resize( vector.size )
+            cpt := 0; for i in vector select( cpt++ ).init( i )
+    
+    def reassign_values( value )
+        for i in self
+            i = value
+    
+    def reassign( value ) when value.tensor_order <= 0
+        for i in self
+            i = value
+    
+    def get_values
+        return self
+    
+    def destroy #
+        # int32_display(reserved_)
+        if reserved_
+            if not item_does_not_need_destroy
+                cpt := size_; while cpt-- select( cpt ).destroy() # destroy sub elements
+            data_.ptr.free()
+            reserved_ = 0
+            size_ = 0
+            
+    def get_data_size_in_bytes
+        return size_ * T.byte_size_if_in_vec
+    
+    def get_begin
+        return data_
+        
+    def get_end
+        return data_ + size_
+        
+    def reserve( ns )
+        if ns > reserved_
+            old_ptr := data_.ptr; old_r := reserved_
+            reserved_ = ns
+            data_ = allocate( T, reserved_, T_alignement )
+            for i in 0 .. size_
+                __get_data_in_dyn_vec__( data_.ptr, pt, i ).init( __get_data_in_dyn_vec__( old_ptr, partial_instanciation T, i ) )
+            if old_r
+                for i in ( 0 .. size_ ).reversed
+                    __get_data_in_dyn_vec__( old_ptr, pt, i ).destroy()
+                old_ptr.free()
+                
+    def resize( ns )
+        while size_ > ns
+            s := size_ - 1
+            select( s ).destroy()
+            size_ = s
+        reserve( ns )
+        
+        if needs_item_init
+            while size_ < ns
+                select( size_++ ).init()
+        else
+            size_ = ns
+            
+    def resize( ns, default_value )
+        while size_ > ns
+            size_--
+            if not item_does_not_need_destroy
+                select( size_ ).destroy()
+        reserve( ns )
+        while size_ < ns
+            select( size_++ ).init( default_value )
+            
+    def new_elem
+        # not enough room ?
+        if size_ >= reserved_
+            reserve( 1 + reserved_ * 2 )
+        return &__get_data_in_dyn_vec__( data_.ptr, pt, size_++ )
+    
+    def new_preinitialized_elem
+        n := new_elem()
+        n->init()
+        return n
+        
+    def new_elem_at_position( pos )
+        os := get_size()
+        resize( os + 1 )
+        for i in ( pos .. os ).reversed
+            select( i+1 ) = select( i )
+        res := &select( pos )
+        res->destroy()
+        res->init()
+        return res
+        
+    def insert_before( item, value )
+        pos := &item - data_
+        n := new_elem_at_position( pos )
+        @n = value
+        return n
+    
+    def make_room_to_insert( from, n )
+        os := size_
+        resize( size_ + n )
+        for i in ( from .. os ).reversed
+            data_[ i + n ] = data_[ i ]
+        return data_ + from
+        
+    def push_back( val ) pertinence 2
+        n := new_elem()
+        n->init( val )
+        return n
+        
+    def push_back( varargs ) #
+        n := new_elem()
+        call( n->init, varargs )
+        return n
+        
+    def push_front( val ) #
+        os := size_ 
+        if not os
+            return push_back( val )
+        n := new_elem()
+        n->init( n[-1] ); n--
+        for cpt in 1..os
+            @n = n[-1]; n--
+        @n = val
+        return n
+        
+    def remove_unordered( i )
+        if i != size-1
+            select( i ) = get_back()
+        size_--
+        
+    def erase_unordered( item )
+        i := index_of_first_item_equal_to( item )
+        assert( i >= 0, "not found" )
+        remove_unordered( i )
+        
+    def append( vec )
+        for v in vec
+            push_back( v )
+            
+    def __for__( block )
+        cpt := 0; while cpt < size_  block( __get_data_in_dyn_vec__( data_.ptr, pt, cpt++ ) )
+        
+    def select( n ) when n.is_a_number
+        assert( n < size_, "indice > size ( $n > $size_ ) in vec of type $T" )
+        return __get_data_in_dyn_vec__( data_.ptr, pt, Int32(n) )
+        
+    def get_back
+        return select( get_size() - 1 )
+        
+    def get_front
+        return select( 0 )
+        
+    def get_pointer_attributes
+        return [ ( data_, reserved_ ) ]
+    
+    def get_additional_cpp_methods
+        res := ""
+        res <<<<
+                const T &operator[]( ST i ) const { return data_[ i ]; }
+                T &operator[]( ST i ) { return data_[ i ]; }
+                const T *begin() const { return data_; }
+                T *begin() { return data_; }
+                const T *end() const { return data_ + size_; }
+                T *end() { return data_ + size_; }
+                const T &back() const { return data_[size_-1]; }
+                T &back() { return data_[size_-1]; }
+                ST size() const { return size_; }
+                ST reserved() const { return reserved_; }
+        #
+        if T in [ Float32 Float64 Float96 Int8 Int16 Int32 Int64 Unsigned8 Unsigned16 Unsigned32 Unsigned64 UntypedPtr ]
+            res <<<<
+                    T *push_back_unique( const T &v ) {
+                        for(unsigned i=0;i<size_;++i)
+                            if ( data_[ i ] == v )
+                                return data_ + i;
+                        T *r = new_elem();
+                        *r = v;
+                        return r;
+                    }
+                    void resize( ST s ) { reserve( s ); size_ = s; }
+                    void reserve( ST r ) {
+                        if ( r <= reserved_ )
+                            return;
+                        if ( r ) {
+                            T *nvec = (T *)malloc( sizeof( T ) *  r );
+                            for(unsigned i=0;i<(size_>r?r:size_);++i)
+                                nvec[i] = data_[i];
+                            if ( reserved_ )
+                                free( data_ );
+                            data_ = nvec;
+                        }
+                        reserved_ = r;
+                    }
+                    T &pop_back() { return data_[--size_]; }
+                    T *new_elem() {
+                        if ( size_ >= reserved_ ) {
+                            T *nd = (T *)malloc( sizeof(T) * ( 2 * size_ + 1 ) );
+                            for(unsigned i=0;i<size_;++i)
+                                nd[i] = data_[i];
+                            data_ = nd;
+                            reserved_ = 2 * size_ + 1;
+                        }
+                        return data_ + size_++;
+                    }
+                    void push_back( const T &val ) {
+                        *new_elem() = val;
+                    }
+                    T *make_room_to_insert( ST from, ST n ) {
+                        ST os = size_;
+                        resize( size_ + n );
+                        for( ST i = os - 1; i >= from; --i )
+                            data_[ i + n ] = data_[ i ];
+                        return data_ + from;
+                    }
+                    void operator=( const SelfType &v ) {
+                        resize( v.size() );
+                        for(unsigned i=0;i<size_;++i)
+                            data_[ i ] = v[ i ];
+                    }
+            #
+        return res
+##
+
+##
+# class Vec( T, static_size = -1, ST = Int32 ) inherits SimpleVec[ T, ST(static_size), ST ]
+    # pass
+
+## vector without any values and without the possibility to add any. ##
+class VoidVec
+    static const tensor_order := 0
+    static const size := 0
+    def __for__( block )
+        pass
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+
+## Array without any value nor type information ##
+class LittleHeterogeneousArray[ tensor_order, sizes ]
+    property is_a_LittleHeterogeneousArray
+    static __tmp_cum_index__ := Vec[Int32,sizes.size]()
+    static const is_a_vector := ( tensor_order == 1 )
+    for i in 0 .. sizes.size
+        __tmp_cum_index__[i] = 1
+        for j in i+1 .. sizes.size
+            __tmp_cum_index__[i] *= sizes[j]
+    
+    static const cum_index := __tmp_cum_index__
+    values := VarArgs()
+    
+    ## copy is mandatory because VarArgs contains ref ##
+    def init( a ) when a.is_a_LittleHeterogeneousArray and a.sizes == sizes
+        values.init()
+        for v in a.values
+            t := v
+            values.push_unnamed( t )
+            
+    ## ##
+    def __for__( block )
+        for i in 0 .. values.nb_unnamed_arguments()
+            block( values.get_unnamed_argument_nb(i) )
+    ## ##
+    def get_size
+        if tensor_order <= 1
+            return values.nb_unnamed_arguments()
+        return sizes
+    ## ##
+    def get_static_size
+        if tensor_order <= 1
+            return values.nb_unnamed_arguments()
+        return sizes
+    ## ##
+    def select( n ) when n.tensor_order < 0
+        assert( tensor_order <= 1, "select( n ) when n.tensor_order < 0 works only if arrays of tensor_order <= 1 (actual tensor_order == $tensor_order)." )
+        return values.get_unnamed_argument_nb( Int32(n) )
+    ## ##
+    def get_nb_rows
+        return sizes[1]
+    ## ##
+    def get_nb_cols
+        return sizes[0]
+    ## ##
+    def select( n ) when n.tensor_order == 1 and n.size == tensor_order pertinence 1
+        s := 0; for i, j in zip( n, cum_index ) s += i * j
+        return values.get_unnamed_argument_nb( s )
+    ## vraiment très **** ce cas particulier pour les matrices ##
+    def select( r, c ) when tensor_order == 2
+        return values[ r * sizes[0] + c ]
+    ## ##
+    def select( varargs ) when varargs.nb_named_arguments()==0 and varargs.nb_unnamed_arguments()==tensor_order pertinence 0.5 # Ex: select(1,2,3) (several arguments)
+        return select( varargs )
+    ## ##
+    def get_nb_values
+        return values.size
+    ## stdout << self ##
+    def write_to_stream( stream )
+        for i, cpt in zip( values, 0 ... )
+            n := 0; while n < sizes.size and cpt % cum_index[ n ] == cum_index[ n ] - 1
+                n++
+            stream << i << stream.options.separators[n-1]
+    ## ##
+    def get_sub_type( op = add )
+        return type_promote( values, op )
+    ## ##
+    def get_sub_types
+        res := VarArgs()
+        for v in values
+            res.push_unnamed( type_of(v) )
+        return res
+    ## ##
+    def equal( v ) when tensor_order == 0 and v.tensor_order == 0
+        return true
+    #~  ~#
+    def map( function )
+        return VecOp( function, self )
+    
+def equal( a, b ) when a.is_a_LittleHeterogeneousArray and b.is_a_LittleHeterogeneousArray and ( ( a.tensor_order==0 and b.tensor_order>0 ) or ( a.tensor_order>0 and b.tensor_order==0 ) )
+    return false
+
+## make a static vector (Vec[Type,size]) from a LittleHeterogeneousArray ##
+def stat_vec( array ) when array.is_a_LittleHeterogeneousArray pertinence 2
+    if array.nb_values == 0  return VoidVec()
+    assert( array.tensor_order==1, "making a stat_vec from a LittleHeterogeneousArray of size $(array.tensor_order) is weird." )
+    return Vec[ type_promote( array.values, reassign ), array.values.nb_unnamed_arguments() ]( array.values )
+
+def stat_vec( array ) when array.tensor_order == 1
+    if array.size == 0  return VoidVec()
+    return Vec[ type_promote( array, reassign ), Int32( array.size ) ]( array )
+
+## make a dynamic sized vector (Vec[Type]) from a LittleHeterogeneousArray ##
+def dyn_vec( array ) when have_same_name( type_of(array), LittleHeterogeneousArray )
+    if array.values.nb_unnamed_arguments() == 0  return VoidVec()
+    assert( array.tensor_order==1, "making a stat_vec from a LittleHeterogeneousArray of size $(array.tensor_order) is weird." )
+    return Vec[ type_promote( array.values, reassign ) ]( array.values )
+    
+##
+   array( tensor_order, s_0, s_1, ..., d_0, d_1, ... )
+   where tensor_order == 1 for a vector...
+   s_x represents size / tensor_order x
+   d_x represents data nb x
+##
+def make_little_heterogeneous_array( tensor_order, varargs ) when varargs.nb_named_arguments() == 0
+    sizes := Vec[ Int32, tensor_order ]( range(tensor_order).map( varargs.get_unnamed_argument_nb(_0) ) )
+    res := LittleHeterogeneousArray[ tensor_order, sizes ]()
+    for i in tensor_order .. varargs.nb_unnamed_arguments()
+        res.values.push_unnamed( varargs.get_unnamed_argument_nb(i) )
+    return res
+
+
+
+## ##
+class VecFromGenericArray
+    op := InternalVariable()
+    array := InternalVariable()
+    size := 0
+    def init( function, a, s ) op.init_using_var(function); array.init_using_var( a ); size = s
+    def select( n )  return a[ (@op)(n) ]
+    def get_sub_types   return array->sub_types
+
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------
+# class ChainedList
+    # beg := InternalVariable()
+    # def init( p ) beg.init_using_var( p )
+    # def __for__( block )
+        # p := @beg
+        # while p
+            # block( @p )
+            # p = p->next
+
+# def chained_list( p )
+    # return ChainedList( p )
+# -----------------------------------------------------------------------------------------------------------
+class ChainedList
+    static const tensor_order := 1
+    # property is_a_vector
+    op := InternalVariable()
+    pl := InternalVariable()
+    
+    def __for__( block )
+        p := @pl
+        while p
+            block( @p )
+            p = (@op)( @p )
+
+def chained_list( first_ptr, function = _0.next )
+    res := ChainedList()
+    res.pl.init_using_var( first_ptr )
+    res.op.init_using_var( function )
+    return res
+
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------
+class ChainedListPtr
+    static const tensor_order := 1
+    # property is_a_vector
+    op := InternalVariable()
+    pl := InternalVariable()
+    
+    def __for__( block )
+        p := @pl
+        while p
+            block( p )
+            p = (@op)( p )
+
+def chained_list_ptr( first_ptr, function = _0->next )
+    res := ChainedListPtr()
+    res.pl.init_using_var( first_ptr )
+    res.op.init_using_var( function )
+    return res
+
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------
+class SplittedVecAtom[ T, atomic_size, next_atomic_size, variable_atomic_size ]
+    def init( r )
+        assert( r == atomic_size, "r == atomic_size" )
+        size.init( 0 )
+        next.init( NULL )
+    def destroy
+        pass
+    static const reserved := atomic_size
+    next ~= Ptr[ SplittedVecAtom[ T, next_atomic_size, next_atomic_size, variable_atomic_size ] ]
+    size ~= Int32
+    data ~= Vec[ T, atomic_size ]
+
+class SplittedVecAtom[ T, atomic_size, next_atomic_size, variable_atomic_size ] when variable_atomic_size pertinence 0.5
+    def init( r )
+        reserved.init( r )
+        if r
+            data.init( allocate( T, r ) )
+        size.init( 0 )
+        next.init( NULL )
+    def destroy
+        if reserved
+            data.free()
+    next ~= Ptr[ SplittedVecAtom[ T, next_atomic_size, next_atomic_size, variable_atomic_size ] ]
+    size ~= Int32
+    reserved ~= Int32
+    data ~= Ptr[ T ]
+
+class SplittedVecAtom[ T, atomic_size, next_atomic_size, variable_atomic_size ] when atomic_size == 0
+    def init( r )
+        assert( r == 0, "VoidVec with size != 0" )
+        next.init( NULL )
+    def destroy
+        pass
+    static const reserved := 0
+    static const size := 0
+    next ~= Ptr[ SplittedVecAtom[ T, next_atomic_size, next_atomic_size, variable_atomic_size ] ]
+    data ~= VoidVec
+
+#~
+~#
+class SplittedVec[ T, atomic_size, first_atom_in_stack = true, ST = Int32, variable_atomic_size = false ]
+    static const tensor_order := 1
+    static const TFirst := SplittedVecAtom[ T, atomic_size * first_atom_in_stack, atomic_size, variable_atomic_size ]
+    static const TLast  := Ptr[ SplittedVecAtom[ T, atomic_size, atomic_size, variable_atomic_size ] ]
+    first ~= TFirst
+    last ~= TLast
+    
+    def init 
+        first.init( ##reservation## atomic_size * ( variable_atomic_size == false ) * first_atom_in_stack )
+        last.init( NULL )
+        
+    def init( s ) when s.tensor_order == 1
+        self.init()
+        for i in s
+            push_back( i )
+            
+    def destroy
+        a := first.next # TODO -> true reversed destroy
+        while a
+            for i in ( 0 .. a->size ).reversed
+                a->data[i].destroy()
+            o := a; a = a->next; o.destroy(); o.free()
+        # info T, first.size
+        # if T::is_a_PtrWithCptUse info T::T
+        for i in ( 0 .. first.size ).reversed
+            first.data[i].destroy()
+        first.destroy()
+        
+    def check_contiguous_room( n, inc_size_by = 0 )
+        if last
+            while true
+                if last->size + n <= last->reserved
+                    r := &last->data[ last->size ]
+                    last->size += inc_size_by
+                    return r
+                if not last->next
+                    next := allocate( SplittedVecAtom[T,atomic_size,atomic_size,variable_atomic_size] )
+                    next->init( max( atomic_size, n ) )
+                    last->next = next
+                    last = next
+                    next->size = inc_size_by
+                    return &next->data[ 0 ]
+                last = last->next
+        # last == NULL
+        if first_atom_in_stack and first.size + n < first.reserved
+            r := &first.data[ first.size ]
+            first.size += inc_size_by
+            return r
+        if first.next
+            last = first.next
+            while true
+                if last->size + n <= last->reserved
+                    r := &last->data[ last->size ]
+                    last->size += inc_size_by
+                    return r
+                if not last->next
+                    next := allocate( SplittedVecAtom[T,atomic_size,atomic_size,variable_atomic_size] )
+                    next->init( max( atomic_size, n ) )
+                    last->next = next
+                    last = next
+                    next->size = inc_size_by
+                    return &next->data[ 0 ]
+                last = last->next
+        # 
+        last = allocate( SplittedVecAtom[T,atomic_size,atomic_size,variable_atomic_size] )
+        last->init( max( atomic_size, n ) )
+        first.next = last
+        last->size = inc_size_by
+        return &last->data[0]
+    
+    def binary_copy_to( p )
+        n := UntypedPtr( p )
+        nb := size_of(partial_instanciation T)
+        for a in [ first ] +++ chained_list( first.next )
+            memcpy( n, (&a.data[0]).ptr, nb, a.size )
+            n += a.size * ( nb // 8 )
+        #
+        p = n
+        
+    def stream_copy_to( stream )
+        nb := size_of( partial_instanciation T ) // 8
+        for a in [ first ] +++ chained_list( first.next )
+            stream.write( a.data.begin, nb * a.size )
+    
+    def new_elem # new uninitialised element. TODO : return a pointer
+        return check_contiguous_room( 1, 1 )
+    
+    def new_elem_in_reserved_room # new uninitialised element. TODO : return a pointer
+        if last
+            return last->data + (last->size++)
+        return first.data + (first.size++)
+    
+    def new_preinitialized_elem
+        n := new_elem()
+        n->init()
+        return n
+        
+    def push_back( varargs )
+        n := new_elem()
+        call( n->init, varargs )
+        return n
+        
+    def push_back_unique( val )
+        for i in self
+            if i == val
+                return &i
+        return push_back( val )
+        
+    def push_back_in_reserved_room( val )
+        n := new_elem_in_reserved_room()
+        n->init( val )
+        return n
+        
+    def push_n( p, n ) # must must be a pointer on n contiguous elements
+        for i in 0 .. n
+            push_back( p[i] ) # TODO -> optimize
+    
+    def push_n_in_reserved_room( p, n ) # must must be a pointer on n contiguous elements
+        for i in 0 .. n
+            push_back_in_reserved_room( p[i] ) # TODO -> optimize
+    
+    def write_binary( p, byte_size ) # must must be a pointer on n contiguous elements
+        nb := ( size_of(partial_instanciation T) + 7 ) // 8
+        si := byte_size // nb
+        np := check_contiguous_room( si, si )
+        memcpy( UntypedPtr( np ), UntypedPtr( p ), 8, byte_size )
+
+    def clear
+        first.size = 0
+        for a in chained_list( first.next )
+            a.size = 0
+        last = NULL
+    
+    def get_item_before( l )
+        for r in chained_list( first.next )
+            if r.next == l
+                return &r
+        return NULL
+
+    def insert_before( ptr, val )
+        for r in [ first ] +++ chained_list( first.next )
+            d_ := &r.data[0]
+            if ptr >= d_ and ptr < d_ + r.size
+                insert_after_or_before_( r, ptr - d_, val )
+                break
+    
+    def insert_after( ptr, val )
+        for r in [ first ] +++ chained_list( first.next )
+            d_ := &r.data[0]
+            if ptr >= d_ and ptr < d_ + r.size
+                insert_after_or_before_( r, ptr - d_ + 1, val )
+                break
+    
+    def insert_after_or_before_( r, n, val ) # @see insert_before, insert_after
+        if r.size < r.reserved
+            for i in ( n .. r.size ).reversed
+                r.data[ i+1 ] = r.data[ i ]
+            r.size++
+        else
+            nr := new SplittedVecAtom[T,atomic_size,atomic_size,variable_atomic_size]( atomic_size )
+            nr->next = r.next
+            r.next = nr
+            nr->size = 1
+            nr->data[0].init( r.data[ r.size - 1 ] )
+            for i in ( n .. r.size-1 ).reversed
+                r.data[ i+1 ] = r.data[ i ]
+        #
+        if n == r.size
+            r.next->data[ 0 ] = val
+        else
+            r.data[ n ] = val
+                
+    def pop_back
+        while last
+            if last->size
+                last->size--
+                return last->data[ last->size ]
+            last = get_item_before( last )
+        #
+        assert( first.size, "no more elements in list." )
+        first.size--
+        return first.data[ first.size ]
+    
+    def pop_back_n( n )
+        for i in 0 .. n
+            pop_back()
+    
+    def contains_data
+        for a in [ first ] +++ chained_list( first.next )
+            if a.size
+                return true
+        return false
+    
+    def get_size
+        res := first.size
+        for b in chained_list( first.next )
+            res += b.size
+        return res
+    
+    def reassign_size( val )
+        assert( 0, "TODO" )
+    
+    def select( i )
+        ii := i
+        for a in [ first ] +++ chained_list( first.next )
+            if ii < a.size
+                return a.data[ii]
+            ii -= a.size
+        assert( 0, "vector index (=$i) out of range (size=$(self.size))" )
+    
+    def remove_unordered( i )
+        if i != size-1
+            select( i ) = pop_back()
+        else
+            pop_back()
+    
+    def __for__( block )
+        for cpt in 0 .. first.size
+            block( first.data[ cpt ] )
+        #
+        for a in chained_list( first.next )
+            for cpt in 0 .. a.size
+                block( a.data[ cpt ] )
+    
+    def get_back
+        if last
+            return last->data[ last->size - 1 ]
+        return first.data[ first.size - 1 ]
+
+    def get_front
+        return first.data[ 0 ]
+    
+    def get_begin
+        return &get_front()
+    
+    def get_end
+        return &get_back()
+    
+    def get_additional_cpp_methods
+        return "
+    ST size() const {
+        ST res = first.size;
+        for( TLast l = first.next; l; l=l->next )
+            res += l->size;
+        return res;
+    }
+    // T operator[]( ST i ) const { return 10; }
+        "
+        
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------
+class VecUnique[ V, cmp = equal ]
+    data := V()
+    
+    def push_back( val )
+        for v in data
+            if cmp( v, val )
+                return &v
+        return data.push_back( val )
+    def clear           data.clear()
+    def get_size        return data.size
+    def select(n)       return data.select(n)
+    def __for__(block)  for i in data  block(i)
+    def get_sub_types   return data.sub_types
+    
+## 
+Ex:
+    for i in Unique( [0,1,3,4,1,4,5] )
+        stdout << i << " "
+gives
+    0 1 3 4 5 
+##
+class Unique
+    array := InternalVariable()
+    def init( vec ) array.init_using_var( vec )
+    def __for__(block) # TODO: without select
+        for i in 0 .. array->size
+            item := ref array->select(i)
+            for j in 0 .. i+1
+                if j == i
+                    block( item )
+                    break
+                else if array->select(j) == item
+                    break
+    
+#~  ~#
+class VecOrdered[ V, cmp = inferior ]
+    static const tensor_order := 1
+    data := V()
+    
+    def init( v ) when v.tensor_order == 1
+        init_using_default_values( self )
+        for val in v
+            push( val )
+    def push( val )
+        for v in data
+            if not cmp( v, val )
+                return data.insert_before( v, val )
+        return data.push_back( val )
+    def clear           data.clear()
+    def get_size        return data.size
+    def select(n)       return data.select(n)
+    def __for__(block)  for i in data  block(i)
+    def get_sub_types   return data.sub_types
+
+# --------------------------------------------------------------------------------------------------------------------------------------------------------------
+def norm_1( vec ) when vec.tensor_order == 1
+    return sum( abs( vec ) )
+    
+def norm_2( vec ) when vec.tensor_order == 1
+    return sqrt( sum( vec ^ 2 ) )
+
+def norm_2_square( vec ) when vec.tensor_order == 1
+    return sum( vec ** 2 )
+    
+def norm_inf( vec ) when vec.tensor_order == 1
+    return max( abs( vec ) )
+    
+def norm_n( vec, n ) when vec.tensor_order == 1
+    return sum( vec ** n ) ** inv( n )
+
+def normalized( vec, function_norm = norm_2 ) when vec.is_a_vector
+    return vec / function_norm( vec )
+
+
+
+# -----------------------------------------------------------------------------------------------------------
+#~
+    Vec with offseted index
+~#
+class VecWithOffset[ offset, T, static_size = -1 ]
+    data := Vec[ T, static_size ]()
+    def select( n )      return data[ n + offset ]
+
+# -----------------------------------------------------------------------------------------------------------
+#~
+Code
+    v := VecSparse[ Float64, default_value=0 ]( 16 )
+    v[5] = 1
+    v[3] = 10
+    v[7] += 7
+    info v
+gives
+    v -> 0 0 0 10 0 0 1 0 0 7 0 0 0 0 0 0 0 0 0 
+~#
+class VecSparse[ T, default_value = T( 0 ), ST = SizeType ]
+    property is_a_VecSparse
+    static const tensor_order := 1
+    indices := Vec[ST]()
+    values := Vec[T]()
+    size_ := ST(0)
+    
+    #
+    def init( size ) when size.is_a_number
+        init_using_default_values( self )
+        size_ = size
+        
+    #
+    def reassign_size( new_size )
+        size_ = new_size
+        while indices.size and indices.back >= new_size
+            values.pop_back()
+            indices.pop_back()
+    
+    #
+    def get_size
+        return size_
+        
+    #
+    def select( n )
+        r := VecSparseDelayedAccess[ST]( self, n )
+        return r.var
+        
+    #
+    class StartingFromFirstNzValue[ ST ]
+        v := InternalVariable()
+        up_to := ST()
+        def init( s, u )
+            v.init_using_var( s )
+            up_to.init( u )
+        def __for__( block )
+            if v->indices.size and v->indices[0] < up_to
+                block( (v->indices[0], v->values[0]) )
+                #
+                for ni in 1 .. v->indices.size
+                    for i in v->indices[ni-1]+1 .. v->indices[ni]
+                        block( ( i, v->default_value ) )
+                    if v->indices[ni] >= up_to
+                        break
+                    block( ( v->indices[ni],v->values[ni] ) )
+                #
+                for i in v->indices.back+1 .. min( up_to, v->size_ )
+                    block( (i, v->default_value) )
+            
+    #
+    def starting_from_first_nz_value( up_to = ST::max_representable )
+        return StartingFromFirstNzValue[ ST ]( self, up_to )
+        
+    #
+    def __for__( block )
+        if indices.size
+            for i in 0 .. indices[0]
+                block( default_value )
+            block( values[0] )
+            #
+            for ni in 1 .. indices.size
+                for i in indices[ni-1]+1 .. indices[ni]
+                    block( default_value )
+                block( values[ni] )
+            #
+            for i in indices.back+1 .. size_
+                block( default_value )
+        else
+            for i in 0 .. size_
+                block( default_value )
+    
+    # returned by select()
+    class VecSparseDelayedAccess[ ST ]
+        vs := InternalVariable()
+        ind := ST(0)
+        
+        def init( v, n )
+            vs.init_using_var( v )
+            ind.init( n )
+            
+        def get_var
+            for i in 0 .. vs->indices.size
+                if vs->indices[i] == ind
+                    return vs->values[i]
+                if vs->indices[i] > ind
+                    return vs->default_value
+            return vs->default_value
+            
+        def reassign_var( v )
+            for i in 0 .. vs->indices.size
+                if vs->indices[i] == ind
+                    vs->values[i] = v
+                    return none
+                if vs->indices[i] > ind
+                    @vs->indices.new_elem_at_position( i ) = ind
+                    @vs->values .new_elem_at_position( i ) = v
+                    return none
+            vs->indices.push_back( ind )
+            vs->values.push_back( v )
+            return none
+        
+        def init_var( v )
+            reassign_var( v )
+
+class CommonNz
+    v1 := InternalVariable()
+    v2 := InternalVariable()
+    def init( v1_, v2_ )
+        v1.init_using_var( v1_ )
+        v2.init_using_var( v2_ )
+    def __for__( block )
+        if v1->indices.size and v2->indices.size
+            i1 := 0; i2 := 0
+            while true
+                if v1->indices[ i1 ] == v2->indices[ i2 ]
+                    block( ( v1->indices[ i1 ], v1->values[ i1 ], v2->values[ i2 ] ) )
+                    if pre_inc( i1 ) == v1->indices.size  break
+                    if pre_inc( i2 ) == v2->indices.size  break
+                else if v1->indices[ i1 ] > v2->indices[ i2 ]
+                    if pre_inc( i2 ) == v2->indices.size  break
+                else
+                    if pre_inc( i1 ) == v1->indices.size  break
+#
+def common_nz( v1, v2 ) when v1.is_a_VecSparse and v2.is_a_VecSparse
+    return CommonNz( v1, v2 )
+                
+# -----------------------------------------------------------------------------------------------------------
+# def get_recursive_tensor_order_rec( v, res ) when v.tensor_order <= 0
+    # res.push_back( 0 )
+
+# def get_recursive_tensor_order_rec( v, res )
+    # res.push_back( v.tensor_order )
+    # get_recursive_tensor_order_rec( partial_instanciation res.sub_types[0], res )
+
+# def get_recursive_tensor_order( self )
+    # res := Vec[Int32]()
+    # get_recursive_tensor_order_rec( self, res )
+    # return res
+
+# -----------------------------------------------------------------------------------------------------------
+#~
+Example:
+v := Vec[Int32]( [1,0,3,1,2] )
+sort( v )
+info v
+~#
+def sort( vec, function = superior )
+    for a, i in vec, 0...
+        for b in vec[ i+1... ]
+            if function( a, b )
+                swap( a, b )
+
+#~
+
+~#
+# class SortedVec
+    # v := InternalVariable()
+    # f := InternalVariable()
+    
+    # def init( v, function = inferior )
+        # self.v.init_using_var( v )
+        # self.f.init_using_var( function )
+        
+    # def get_size
+        # return v->size
+        
+    # def __for__( block, min_value, remaining )
+        # while remaining.size
+            # pass
+            
+    # def __for__( block )
+        # min_index := SizeType( 0 )
+        # for i in 0 .. v->size
+            # if (@f)(  )
+                # min_index = i
+        # #
+        # remaining := Vec[ SizeType ]( 0 .. v->size )
+        # __for__( block, min_index, remaining )
+            
+

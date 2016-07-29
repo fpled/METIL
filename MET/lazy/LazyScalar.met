@@ -1,0 +1,274 @@
+import "LazyObjectAncestor.met"
+import "std_operators.met"
+import "UnknownType.met"
+
+#~
+    One value with delayed evaluation
+~#
+class LazyScalar
+    property is_a_LazyScalar
+    
+    data := PtrWithCptUse[ LazyScalarObject ]( NULL )
+    
+    def init( val ) when not val.is_a_LazyScalar
+        data.init( new_lazy_leave( LazyScalarValue[ type_of( val ) ], val ) )
+
+    def init( met_name, tex_name = met_name, T = UnknownType ) when met_name.is_a_String and tex_name.is_a_String
+        d := new LazyScalarSymbol[ T ]
+        d->met_name = met_name
+        d->tex_name = tex_name
+        data.init( d )
+    
+    def get_T # base scalar type ( Symbol if no scalar type have been defined )
+        return data->get_T()
+    
+    def apply_lazy_objects( op )
+        op( data )
+
+    def write_to_stream( stream )
+        if data->is_calculable
+            if not data->done
+                ls := LazySimpleScheduler( [ data.ptr ] ); ls.execute()
+            stream << child_cast( data )->value
+        else
+            write_met_form( stream )
+            
+    def write_met_form( stream, precedance = 0 )
+        data->write_met_form( stream, precedance )
+
+    def conversion_to( val ) when val.is_a_number
+        if not data->done
+            ls := LazySimpleScheduler( [ data.ptr ] ); ls.execute()
+        val.init( child_cast( data )->value )
+
+
+#~
+    Base class for LazyScalar data ( can be a function, a symbolic value )
+~#
+class LazyScalarObject inherits LazyObjectAncestor
+    virtual def get_is_calculable                     abstract
+    virtual def get_T                                 abstract
+    virtual def write_met_form( stream, precedance )  abstract
+
+
+
+#~
+    typed or not ( if T == UknownType ) symbol
+~#
+class LazyScalarSymbol[ T_ ] inherits LazyScalarObject
+    met_name := ""
+    tex_name := ""
+
+    virtual def get_done                              return false
+    virtual def evaluate                              assert( 0, "a symbolic object cannot be evaluated" )
+    virtual def get_is_calculable                     return false
+    virtual def get_T                                 return T_
+    virtual def write_met_form( stream, precedance )  stream << met_name
+    virtual def write_to_stream( stream )             stream << met_name
+
+
+#~
+    Base class for LazyScalarBinaryOp or LazyScalarUnaryOp
+~#
+class LazyScalarValue[ T_ ] inherits LazyScalarObject
+    value ~= T_
+        
+    def init( val ) when type_of( val ) == T_
+        init_lazy_obj()
+        value.init( val )
+        
+    def init_would_give_the_same_result( val )
+        return val == value
+        
+    virtual def get_done                                             return true
+    virtual def free                                                 value.destroy()
+    virtual def get_is_calculable                                    return true
+    virtual def get_T                                                return T_
+    virtual def evaluate                                             pass
+    virtual def write_to_stream( stream )                            stream << value
+    virtual def write_met_form( stream, precedance )
+        str := String( value )
+        par := ( "/" in str ) and precedance > Div::precedance # TODO : generic case
+        if par  stream << "("
+        stream << str
+        if par  stream << ")"
+
+    virtual def nb_rw_estimation
+        return T.byte_size
+
+
+#~
+    Base class for LazyScalarBinaryOp, LazyScalarUnaryOp, ...
+~#
+class LazyScalarFunction[ T_, calculable_ ] inherits LazyScalarObject
+    value ~= [ UnknownType, T_ ][ calculable_ ]
+    done_ := false
+    
+    virtual def get_done                                             return done_
+    virtual def free                                                 value.destroy()
+    virtual def get_is_calculable                                    return calculable_
+    virtual def get_T                                                return T_
+
+#~
+~#
+class LazyScalarBinaryOp[ T_, op, calculable_ ] inherits LazyScalarFunction[ T_, calculable_ ]
+    virtual def write_to_stream( stream )
+        stream << op << "(S)"
+    
+    virtual def evaluate
+        if calculable_
+            value.init( op( child_cast( children[0] )->value, child_cast( children[1] )->value ) )
+            done_ = true
+        
+    virtual def write_met_form( stream, precedance )
+        par := precedance > op.precedance
+        if par  stream << "("
+        
+        if op.type == Add
+            child_cast( children[0] )->write_met_form( stream, op.precedance )
+            stream << "+"
+            child_cast( children[1] )->write_met_form( stream, op.precedance )
+        else if op.type == Mul
+            child_cast( children[0] )->write_met_form( stream, op.precedance )
+            stream << "*"
+            child_cast( children[1] )->write_met_form( stream, op.precedance )
+        else if op.type == Pow
+            child_cast( children[0] )->write_met_form( stream, op.precedance )
+            stream << "^"
+            child_cast( children[1] )->write_met_form( stream, op.precedance )
+        else
+            stream << op.met_repr << "("
+            child_cast( children[0] )->write_met_form( stream, op.precedance )
+            stream << "," 
+            child_cast( children[1] )->write_met_form( stream, op.precedance )
+            stream << ")"
+            
+        if par  stream << ")"
+
+
+# BT is a LazyScalarTypedBinaryOp[R->ReturnType] or a LazyScalarUntypedBinaryOp
+def lazy_scalar_binary_op( a, b, op )
+    # simplifications / reordering
+    if a->done
+        if b->done
+            return LazyScalar( op( a->value, b->value ) )
+    else
+        if op.commutative_op
+            if b->done
+                return lazy_scalar_binary_op( b, a, op ) # known values at the left
+            if UntypedPtr( a ) > UntypedPtr( b )
+                return lazy_scalar_binary_op( b, a, op )
+    
+    # some trivial simplifications
+    if op.is_an_Add
+        if a->done and a->value == 0
+            return LazyScalar( data = b )
+    
+    # look in parents for similar op
+    BT := LazyScalarBinaryOp[ op.ReturnType( child_cast(a)->T, child_cast(b)->T ), op, a->get_is_calculable() and b->get_is_calculable() ]
+    # BT_ := LazyScalarBinaryOp[ op.ReturnType( child_cast(a)->T, child_cast(b)->T ), op, a->is_calculable and b->is_calculable ]
+    # BT := type_of( partial_instanciation BT_ ) # because of wrong comparison (TODO in Def.equal)
+    # for ls in a->parents
+        # if true_type( @ls ) == BT
+            # t := reinterpret_cast( Ptr[ BT ], ls )
+            # if op == t->op and UntypedPtr( t->children[0] ) == UntypedPtr( a ) and UntypedPtr( t->children[1] ) == UntypedPtr( b )
+                # return LazyScalar( data = t )
+    #
+    ls := new BT
+    ls->add_child( a )
+    ls->add_child( b )
+    return LazyScalar( data = ls )
+
+#
+def add( a, b ) when a.is_a_LazyScalar and b.is_a_LazyScalar pertinence 10  return lazy_scalar_binary_op( child_cast( a.data ), child_cast( b.data ), Add() )
+def sub( a, b ) when a.is_a_LazyScalar and b.is_a_LazyScalar pertinence 10  return lazy_scalar_binary_op( child_cast( a.data ), child_cast( b.data ), Sub() )
+def mul( a, b ) when a.is_a_LazyScalar and b.is_a_LazyScalar pertinence 10  return lazy_scalar_binary_op( child_cast( a.data ), child_cast( b.data ), Mul() )
+def div( a, b ) when a.is_a_LazyScalar and b.is_a_LazyScalar pertinence 10  return lazy_scalar_binary_op( child_cast( a.data ), child_cast( b.data ), Div() )
+def pow( a, b ) when a.is_a_LazyScalar and b.is_a_LazyScalar pertinence 10  return lazy_scalar_binary_op( child_cast( a.data ), child_cast( b.data ), Pow() )
+
+def inferior( a, b ) when a.is_a_LazyScalar and b.is_a_LazyScalar pertinence 10  return lazy_scalar_binary_op( child_cast( a.data ), child_cast( b.data ), Inferior() )
+def superior( a, b ) when a.is_a_LazyScalar and b.is_a_LazyScalar pertinence 10  return lazy_scalar_binary_op( child_cast( a.data ), child_cast( b.data ), Superior() )
+
+def pow( a, b ) when a.is_a_LazyScalar and b.is_an_integer_number pertinence 100
+    return lazy_scalar_binary_op( child_cast( a.data ), new_lazy_leave( LazyScalarValue[ type_of( b ) ], b ), Pow() )
+
+
+
+
+
+#~
+~#
+class LazyScalarUnaryOp[ T_, op, calculable_ ] inherits LazyScalarFunction[ T_, calculable_ ]
+    virtual def write_to_stream( stream )
+        stream << op << "(S)"
+    
+    virtual def evaluate
+        if calculable_
+            info child_cast( children[0] )->value
+            value.init( op( child_cast( children[0] )->value ) )
+            done_ = true
+        
+    virtual def write_met_form( stream, precedance )
+        # par := precedance > op.precedance
+        # if par  stream << "("
+        stream << op.met_repr << "("
+        child_cast( children[0] )->write_met_form( stream, op.precedance )
+        stream << ")"
+        # if par  stream << ")"
+
+
+# BT is a LazyScalarTypedBinaryOp[R->ReturnType] or a LazyScalarUntypedBinaryOp
+def lazy_scalar_unary_op( a, op )
+    # simplifications / reordering
+    if a->done
+        return LazyScalar( op( a->value ) )
+    
+    # look in parents for similar op
+    BT := LazyScalarUnaryOp[ op.ReturnType( child_cast(a)->T ), op, a->get_is_calculable() ]
+    # BT_ := LazyScalarUnaryOp[ op.ReturnType( child_cast(a)->T ), op, a->is_calculable ]
+    # BT := type_of( partial_instanciation BT_ ) # because of wrong comparison (TODO in Def.equal)
+    # for ls in a->parents
+        # if true_type( @ls ) == BT
+            # t := reinterpret_cast( Ptr[ BT ], ls )
+            # if op == t->op and UntypedPtr( t->children[0] ) == UntypedPtr( a )
+                # return LazyScalar( data = t )
+    #
+    ls := new BT
+    ls->add_child( a )
+    return LazyScalar( data = ls )
+
+
+#
+def heaviside( a ) when a.is_a_LazyScalar pertinence 10  return lazy_scalar_unary_op( child_cast( a.data ), Heaviside() )
+
+
+
+#
+def type_promote( a, b, op ) when b.is_a_LazyScalar pertinence 15
+    return LazyScalar
+#
+def type_promote( a, b, op ) when a.is_a_LazyScalar pertinence 15
+    return LazyScalar
+
+
+#
+def type_promote( a, b, op ) when a.is_a_LazyVec and b.is_a_LazyScalar pertinence 15
+    return LazyVec
+
+#
+def op_with_ret_using_type_promote( a, b, op ) when a.is_a_LazyVec and b.is_a_LazyScalar
+    tmp := LazyVec()
+    tmp.sub_vecs.reserve( a.sub_vecs.size )
+    for s in a.sub_vecs
+        tmp.sub_vecs_push_back( new LazyVecPartOperatorCstValueFromLazyScalar[ b.get_T(), a.ST ]( s->size, b ) )
+    #
+    return op( a, tmp )
+
+#
+def op_with_ret_using_type_promote( a, b, op ) when a.is_a_LazyScalar and b.is_a_LazyVec
+    tmp := LazyVec()
+    tmp.sub_vecs.reserve( b.sub_vecs.size )
+    for s in b.sub_vecs
+        tmp.sub_vecs_push_back( new LazyVecPartOperatorCstValueFromLazyScalar[ a.get_T(), b.ST ]( s->size, a ) )
+    #
+    return op( tmp, b )

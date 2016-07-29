@@ -1,0 +1,11 @@
+import "EF/std_elements.met"
+
+e := SymbolicElement[Triangle]()
+e.pos_nodes = [
+ [0 0],
+ [0 1],
+ [1 0]
+]
+info e.pos
+info child_cast( e.children(1)[0] )->pos
+

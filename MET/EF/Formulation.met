@@ -1,0 +1,409 @@
+import "EF/read_mesh.met"
+import "EF/DisplayParaview.met"
+import "lazy/LazyMat.met"
+import "LazyOperatorFieldProjection.met"
+#~
+~#
+class VariableInFormulation[ interpolation, nb_dim, unknown, default_value ]
+    property is_a_VariableInFormulation
+    static const T    := Float64
+    static nd0        := 0
+    if nb_dim.size
+        nd0 = nb_dim[0]
+    static const TT   := [ T , Vec[T ,nd0] ][ nb_dim.size ]
+    static const TO   := [ Op, Vec[Op,nd0] ][ nb_dim.size ]
+    static const TVAL := [ LazyVec, TT ][ interpolation == "global" ]
+    static const TVCP := [ Vec[TT], TT ][ interpolation == "global" ]
+    
+    sym_nodal_val := Vec[ Op ]() # filled by init of FormulationCompilerInstance
+    sym_nodal_tst := Vec[ Op ]() # filled by init of FormulationCompilerInstance
+    
+    expr          := TO()
+    test          := TO()
+    
+    val           := TVAL()
+
+    support       := Ptr[ FieldSupport ]( NULL )
+    met_name      := ""
+    
+    def get_nb_nodal_values
+        return product( nb_dim, 1 )
+        
+    def get_ScalarType
+        return T
+        
+    def projection_on( mesh )
+        if interpolation == "global"
+            return val
+        #
+        om := child_cast( support )
+        res := LazyVec()
+        for elem_list in om->elem_list.sub_vecs # -> add contribution of sub_list from original mesh
+            tmp := LazyVec()
+            for sub_pos in mesh.node_list.sub_vecs # -> get position of nodes
+                op := new LazyOperatorFieldProjection[ TT, elem_list->get_ScalarType(), mesh.Pvec ]
+                op->size = sub_pos->size
+                assert( val.sub_vecs.size == 1, "TODO..." )
+                assert( om->elem_list.sub_vecs.size == 1, "TODO..." )
+                
+                op->add_child( elem_list )
+                op->add_child( sub_pos )
+                op->add_child( val.sub_vecs[0] )
+                for nl in om->node_list.sub_vecs
+                    op->add_child( nl )
+                
+                tmp.sub_vecs_push_back( op )
+            if res.size  res += tmp
+            else         res = tmp
+        return res
+        
+#
+def Variable( interpolation = "nodal", nb_dim = [], unknown = false, default_value = 0 )
+    return VariableInFormulation[ String(interpolation), Vec[Int32](nb_dim), unknown, default_value ]()
+
+#
+def type_promote( a, b, op ) when a.is_a_VariableInFormulation and is_of_type_Op( b )  return Op
+
+#
+def type_promote( a, b, op ) when b.is_a_VariableInFormulation and is_of_type_Op( a )  return Op
+
+#~ ~#
+class LazyMatPartFromFormulation[ Form, TE, T, br, bc, nr, nc ] inherits LazyMatPartSparse[ T, SizeType, br, bc, nr, nc ]
+    property is_a_LazyMatPartFromFormulation
+    static cpp_func ~= CppCompiledFunctionSet_
+    static make_mat := UntypedPtr( NULL )
+    
+    form := Ptr[ Form ]()
+    
+    virtual def evaluate
+        if not make_mat
+            cpp_func.init( self )
+            make_mat = cpp_func[ "make_mat" ]
+        elem_list := child_cast( children[0] )
+        node_list := child_cast( children[1] )
+        
+        # for c in children
+            # info true_type( @c ), child_cast( c )->done
+            # info c
+        # for name, val in AttributeExplorer( @form ) # hum
+            # if val.is_a_VariableInFormulation
+                # if val.vec.tensor_order == 1
+                    # info name
+                    # for s in val.val.sub_vecs
+                        # info s, true_type( @s )
+                        # assert( s->done, "dependency pb" )
+                    # val.val.conversion_to( val.vec )
+                # else
+                    # val.vec = val.val
+        
+        exec_ccode_function( make_mat, data, @form, elem_list->data, elem_list->size, @node_list->data, node_list->size )
+        
+    virtual def write_to_stream( stream )
+        stream << "Mat($Form)"
+    
+    def get_src( stream )
+        fi := form->make_form_info( TE )
+        
+        # on elems
+        ce := CodeWriter( "T" )
+        for sr in 0 .. fi.sym_nodal_unk_test.size
+            v := fi.on_elems.diff( fi.sym_nodal_unk_test[ sr ] )
+            for sc in 0 .. fi.sym_nodal_unknowns.size
+                m := v.diff( fi.sym_nodal_unknowns[ sc ] )
+                ce.add( "v_$(sr)_$(sc)", m, init )
+                
+        # on nodes
+        cn := CodeWriter( "T" )
+        for sr in 0 .. br
+            v := fi.on_nodes.diff( fi.sym_nodal_unk_test[ sr ] )
+            for sc in 0 .. bc
+                m := v.diff( fi.sym_nodal_unknowns[ sc ] )
+                cn.add( "n_$(sr)_$(sc)", m, init )
+        
+        stream <<<< 
+            #include <iostream>
+            #include <cmath>
+            template<class RD,class TF,class TE,class ST,class TP> void make_mat( RD *res, TF &form, TE *e, ST nb_elem, TP &pos0, ST nb_node ) {
+                typedef typename RD::T T;
+                for(unsigned ne=0;ne<nb_elem;++ne) {
+                    TE &elem = e[ ne ];
+                    TP *pos = &pos0;
+                    #define IND(n) elem.ind[n].index
+            $( ce.to_string( 8 ) )
+        for n0 in 0 .. TE::nb_nodes
+            for n1 in 0 .. TE::nb_nodes
+                values := Vec[String]()
+                for r in 0 .. br
+                    for c in 0 .. bc
+                        values.push_back( "v_$(n0*br+r)_$(n1*bc+c)" )
+                val := join( values, ", " )
+                stream <<< "        res[ e[ ne ].ind[ $n0 ].index ].add( 0, e[ ne ].ind[ $n1 ].index * $bc, $val );"
+        stream <<<< 
+                    #undef IND
+                }
+                for(unsigned nn=0;nn<nb_node;++nn) {
+                    #define IND(n) nn
+        values := Vec[String]()
+        for n0 in 0 .. br
+            for n1 in 0 .. bc
+                values.push_back( "n_$(n0)_$(n1)" )
+        val := join( values, ", " )
+        stream <<< cn.to_string( 8 )
+        stream <<< "        res[ nn ].add( 0, nn * $bc, $val );"
+        stream <<<< 
+                    #undef IND
+                }
+            }
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "make_mat", [ Ptr[ RD ], Form, Ptr[TE], ST, Vec[T,Form::dim], ST ] )
+        ]
+    
+    def get_control_sum
+        return last_modification_time_or_zero_of_file_named( __file_at_stack_level__(0) )
+
+#~ ~#
+class LazyVecPartFromFormulation[ Form, TE, T, br ] inherits LazyVecPart[ T, SizeType ]
+    static cpp_func ~= CppCompiledFunctionSet_
+    static make_mat := UntypedPtr( NULL )
+    
+    form := Ptr[ Form ]()
+    
+    virtual def evaluate
+        if not make_mat
+            cpp_func.init( self )
+            make_mat = cpp_func[ "make_vec" ]
+        elem_list := child_cast( children[0] )
+        node_list := child_cast( children[1] )
+        
+        # for name, val in AttributeExplorer( @form ) # hum
+            # if val.is_a_VariableInFormulation
+                # if val.vec.tensor_order == 1
+                    # val.val.conversion_to( val.vec ) 
+                # else
+                    # val.vec = val.val  
+        
+        exec_ccode_function( make_mat, data, @form, elem_list->data, elem_list->size, @node_list->data, node_list->size )
+        
+    virtual def write_to_stream( stream )
+        stream << "Vec($Form)"
+    
+    def get_src( stream )
+        fi := form->make_form_info( TE )
+        # on elems
+        ce := CodeWriter( "T" )
+        for sr in 0 .. fi.sym_nodal_unk_test.size
+            v := fi.on_elems.diff( fi.sym_nodal_unk_test[ sr ] ).subs( fi.sym_nodal_unknowns, fi.sym_nodal_unknowns * 0 )
+            ce.add( "v_$(sr)", - v, init )
+        # on nodes
+        cn := CodeWriter( "T" )
+        for sr in 0 .. br
+            v := fi.on_nodes.diff( fi.sym_nodal_unk_test[ sr ] ).subs( fi.sym_nodal_unknowns, fi.sym_nodal_unknowns * 0 )
+            cn.add( "n_$(sr)", - v, init )
+        stream <<<< 
+            #include <iostream>
+            #include <cmath>
+            template<class T,class TF,class TE,class ST,class TP> void make_vec( T *res, TF &form, TE *e, ST nb_elem, TP &pos0, ST nb_node ) {
+                for(unsigned nn=0;nn<nb_node;++nn) {
+                    #define IND(n) nn
+        stream <<< cn.to_string( 8 )
+        for n0 in 0 .. br
+            stream <<< "        res[ $br * nn + $n0 ] = n_$(n0);"
+        stream <<<< 
+                    #undef IND
+                }
+                for(unsigned ne=0;ne<nb_elem;++ne) {
+                    TE &elem = e[ ne ];
+                    TP *pos = &pos0;
+                    #define IND(n) elem.ind[n].index
+        stream <<< ce.to_string( 8 )
+        for n0 in 0 .. TE::nb_nodes
+            for r in 0 .. br
+                stream <<< "        res[ $br * e[ ne ].ind[ $n0 ].index + $r ] += v_$(n0*br+r);"
+        stream <<<< 
+                    #undef IND
+                }
+            }
+    #
+    def get_wanted_functions
+        return [
+            CppFunctionDescription( "make_vec", [ Ptr[ T ], Form, Ptr[TE], ST, Vec[T,Form::dim], ST ] )
+        ]
+    
+    def get_control_sum
+        return last_modification_time_or_zero_of_file_named( __file_at_stack_level__(0) )
+
+#~
+    Base class for formulations like Elasticity, ...
+~#
+class Formulation[dim]
+    static const dV := symbol("dV")
+    static const dN := symbol("dN")
+    
+    support         := Ptr[ FieldSupport ]()
+    current_element := MultiPtr()
+    
+    class FormInfo
+        sym_nodal_unknowns := Vec[ Op ]()
+        sym_nodal_unk_test := Vec[ Op ]()
+        residual           := Op()
+        on_elems           := Op()
+        on_nodes           := Op()
+    
+    def init( mesh ) when mesh.is_a_FieldSupport
+        init_using_default_values( self )
+        support = &mesh
+        #
+        for name, val in AttributeExplorer( self )
+            if val.is_a_VariableInFormulation
+                if val.interpolation == "nodal"
+                    val.val.sub_vecs_push_back(
+                        new LazyVecPartOperatorCstValue[ val.TT, SizeType ]( mesh.node_list.size, val.default_value )
+                    )
+                else
+                    val.val = val.default_value
+                val.support = support
+                val.met_name = name
+            
+    def make_form_info( TE )
+        current_element = &TE::sym_elt
+        fi := FormInfo()
+        
+        #
+        for name, val in AttributeExplorer( self )
+            if val.is_a_VariableInFormulation
+                val.sym_nodal_val.size = 0; val.sym_nodal_tst.size = 0
+                val.expr = TE::sym_elt.new_variable( name, val.nb_dim, val.sym_nodal_val, interpolation_type = val.interpolation )
+                val.test = TE::sym_elt.new_variable( name, val.nb_dim, val.sym_nodal_tst, interpolation_type = val.interpolation )
+                if val.unknown
+                    for v in val.sym_nodal_val
+                        fi.sym_nodal_unknowns.push_back( v )
+                    for v in val.sym_nodal_tst
+                        fi.sym_nodal_unk_test.push_back( v )
+        
+        fi.residual = self.formulation()
+        
+        #
+        fi.on_elems = current_element->integration( fi.residual.diff( dV ) )
+        fi.on_nodes = fi.residual.diff( dN ).subs( current_element->var_inter, current_element->var_inter * 0 )
+        fi.residual = fi.residual.subs( [dN,dV], [0 0] )
+        
+        return fi
+        
+    def get_nb_nodal_unknowns
+        res := 0
+        for name, val in AttributeExplorer( self )
+            if val.is_a_VariableInFormulation and val.unknown
+                res += val.get_nb_nodal_values()
+        return res
+    
+    def matrix
+        mesh := child_cast( support )
+        nb_nodal_unknowns_ := get_nb_nodal_unknowns()
+        mp := Ptr[ LazyMatPart[ SizeType ] ]( NULL )
+        for elem_list in mesh->elem_list.sub_vecs
+            TE := elem_list->get_ScalarType()
+            # look for friend
+            LMP := LazyMatPartFromFormulation[ type_of( self ), TE, mesh->T, br = nb_nodal_unknowns_, bc = nb_nodal_unknowns_, nr = 1, nc = 1 ]
+            nmp := Ptr[ LMP ]( NULL )
+            for p in elem_list->parents
+                if child_cast( p )->is_a_LazyMatPartFromFormulation
+                    print "warning!!"
+                    nmp = child_cast( p )
+                    break
+            #
+            if not nmp
+                nmp = new LMP
+                nmp->nb_rows = nb_nodal_unknowns_ * mesh->node_list.size
+                nmp->nb_cols = nb_nodal_unknowns_ * mesh->node_list.size
+                nmp->form = &self
+                
+                # print "!!!!!!!!!!!!!!!!!!!!!!!!!!"
+                nmp->add_child( elem_list )
+                for node_list in mesh->node_list.sub_vecs
+                    nmp->add_child( node_list )
+                for name, val in AttributeExplorer( self )
+                    if val.is_a_VariableInFormulation and val.interpolation == "nodal"
+                        for s in val.val.sub_vecs
+                            # print "warning!!"
+                            # if name in [ "dep_imposed_value" ]
+                            nmp->add_child( s )
+                
+            if not mp mp = nmp
+            else assert( 0, "TODO" )
+        # 
+        res := LazyMat()
+        if mp
+            res.set_sub_block( 0, 0, mp )
+        return res
+        
+    def vector
+        mesh := child_cast( support )
+        nb_nodal_unknowns_ := get_nb_nodal_unknowns()
+        mp := Ptr[ LazyVecPartAncestor[ SizeType ] ]( NULL )
+        for elem_list in mesh->elem_list.sub_vecs
+            TE := elem_list->get_ScalarType()
+            #
+            nmp := new LazyVecPartFromFormulation[ type_of( self ), TE, mesh->T, nb_nodal_unknowns_ ]
+            nmp->size = nb_nodal_unknowns_ * mesh->node_list.size
+            nmp->form = &self
+            
+            nmp->add_child( elem_list )
+            for node_list in mesh->node_list.sub_vecs
+                nmp->add_child( node_list )
+                
+            for name, val in AttributeExplorer( self )
+                if val.is_a_VariableInFormulation
+                    if val.interpolation == "nodal"
+                        for s in val.val.sub_vecs
+                            # if name in [ "dep_imposed_value", "dep_imposed" ]
+                            nmp->add_child( s )
+            
+            if not mp mp = nmp
+            else assert( 0, "TODO" )
+        # 
+        res := LazyVec()
+        if mp
+            res.sub_vecs_push_back( mp )
+        return res
+
+
+    def grad( t )       return current_element->grad( t )
+    def grad_sym( t )   return current_element->grad_sym( t )
+
+        
+    def hooke_iso( E, nu )
+        e := Mat[ Op, Gen[dim,dim] ]( function = x => symbol("e_{$(x)}") )
+        s := sigma_hooke_iso( e, E, nu )
+        # -> sigma.diff( epsilon )
+        H := Tensor[ Op, [dim,dim,dim,dim] ]( function = x => 0 )
+        for ind_s, val_s in s
+            for ind_e, val_e in e
+                H[ ind_s +++ ind_e ] = val_s.diff(val_e)
+        return H
+
+def sigma_hooke_iso( eps, young, poisson )
+    dim := eps.nb_rows
+    Id := Mat[ Op, Gen[dim,dim] ]( function = x => x[0] == x[1] )
+    return young / ( 1 + poisson ) * ( eps + poisson / ( 1 - 2 * poisson ) * trace( eps ) * Id )
+
+#~
+  Example of formulation
+    + dot( dep_imposed_strength.expr * ( dep.expr - dep_imposed.expr ), dep.test ) * dN
+~#
+class Elasticity[dim] inherits Formulation[dim]
+    dep := Variable( "nodal", [ dim ], unknown = true, default_value = [ 0 0 ] )
+    E   := Variable( "global", default_value = 210e9 )
+    nu  := Variable( "global", default_value = 0.33 )
+    dep_imposed       := Variable( "nodal", [ dim ], default_value = [ 0 0 ] )
+    dep_imposed_value := Variable( "nodal", [ dim ], default_value = [ 0 0 ] )
+
+    def formulation
+        H := hooke_iso( E.expr, nu.expr )
+        # de :=  + dep_imposed.expr * ( dep_imposed_value.expr - dep.expr )
+        # dt :=  + dep_imposed.expr * ( dep_imposed_value.expr - dep.test )
+        return grad_sym( dep.expr ) : H : grad_sym( dep.test ) * dV + 
+               dot( dep_imposed.expr * ( dep.expr - dep_imposed_value.expr ), dep.test ) * dN
+
+

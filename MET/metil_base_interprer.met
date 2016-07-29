@@ -1,0 +1,4 @@
+
+print "** Metil interactive mode. Type CTRL-D, exit or return xx to quit. **"
+
+interact

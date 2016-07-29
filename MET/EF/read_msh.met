@@ -1,0 +1,12 @@
+import "Mesh.met"
+
+#~
+~#
+def read_msh( m, stream )
+    pass
+
+#~
+~#
+def read_msh( m, filename ) when filename.is_a_String
+    read_msh( m, File( filename, "r" ) )
+    

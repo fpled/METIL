@@ -1,0 +1,6 @@
+#ifndef METIL_MPI_CONFIG_H
+#define METIL_MPI_CONFIG_H
+
+#cmakedefine HAVE_MPI @HAVE_MPI@
+
+#endif // METIL_MPI_CONFIG_H

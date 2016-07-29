@@ -1,0 +1,35 @@
+import "lazy.met"
+
+#~
+~#
+class LazyStream
+    property is_a_LazyStream, is_lazy
+    static const LO := LazyObject[ Ptr[File[true,false]] ]
+    stream := PtrWithCptUse[ LO ]()
+    
+    def init( v ) when v.is_a_LazyStream
+        stream.init( v.stream )
+    
+    def init( v ) 
+        stream.init( new LO( value = v ) )
+        
+    def init( function ) pertinence -2
+        stream.init( new LO( function = function ) )
+
+#~
+~#
+class LazyStreamShiftLeft inherits LazyFunc
+    property has_repr
+    def apply( data, args )
+        @args[0]->data << @args[1]->data
+        @data = @args[0]->data
+    def repr
+        return "<<"
+
+#
+def shift_left( stream, value ) when stream.is_a_LazyStream and value.is_a_LazyScalar
+    res := LazyStream( function = new LazyStreamShiftLeft )
+    res.stream->add_child( stream.stream )
+    res.stream->add_child( value.value )
+    stream = res
+    return res

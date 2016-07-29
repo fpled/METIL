@@ -1,0 +1,32 @@
+
+#~
+    @see DisplayParaview
+~#
+class LazyObjectStreamWriter[ T, binary = false ] inherits LazyObjectAncestor
+    filename := ""
+    mode     := "" # w, a, ...
+    done_    := false
+    str      := T() # data to write
+    
+    def init( f, m, s )
+        init_lazy_obj()
+        filename = f
+        mode     = m
+        str      = s
+    
+    virtual def get_done
+        return done_
+        
+    virtual def evaluate
+        f := File( filename, mode )
+        if binary
+            f.write( UntypedPtr( &str ), size_of( str ) // 8 )
+        else
+            f << str
+        done_ = true
+    
+    
+    virtual def write_to_stream( s )
+        s << "StreamWriter($mode)"
+        
+        

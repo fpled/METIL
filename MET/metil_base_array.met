@@ -1,0 +1,239 @@
+##
+    multidimensionnal arrays...
+##
+
+## array without any value (tensor_order = 0)... ##
+class VoidArray
+    static const tensor_order := 0
+    pass
+    
+##  ##
+class Array( T, s_ = [], d = 0, ST = SizeType )
+    property is_an_array
+    static const s := Vec[ Int32, s_.size ]( s_ )
+    static const static_tensor_order   := max( s.size - (s.size==0), d )
+    static const static_sizes := ( s, vec_cst( tensor_order, -1 ) )[ Int32( d > s.size ) ]
+    static const known_nb_values  := [ false, all( s.map( _0 >= 0 ) ) ][ s.size != 0 ]
+    static const static_nb_values := [ -1, product( s ) ][ Int32(known_nb_values) ]
+    static const static_cum_index_reversed := Vec[ST,ST(s.size)]( accumulation( s.reversed, mul, first_val = 1 ) )
+    static const static_cum_index := Vec[ST,ST(s.size)]( static_cum_index_reversed.reversed )
+    
+    data := Vec[ T, static_nb_values ]()
+    dynamic_cum_index := Vec[ Int32, static_tensor_order ]( default_value = 0 )
+    _sizes := Vec[ Int32, ( 1 - known_nb_values ) * static_tensor_order ]( default_value = 0 )
+    
+    #
+    def init
+        init_using_default_values( self )
+        data.init( size = max( 0, static_nb_values ), default_value = T() )
+        
+    #
+    def init( a ) when a.is_an_array
+        init_using_default_values( self )
+        dynamic_cum_index = a.dynamic_cum_index
+        for ind, v in self
+            v.init( a[ ind ] )
+            
+    #
+    def init( default_value = a ) pertinence -2
+        data.init( default_value = default_value )
+    
+    #
+    def init( values ) pertinence -2
+        data.init( values = values )
+    
+    #
+    def _update_cum_sizes( sizes )
+        cum_index = Vec[Int32](accumulation( sizes.reversed, mul, first_val = 1 )).reversed
+        data.size = product( sizes )
+        _sizes = sizes
+    
+    #
+    def init( sizes ) when sizes.tensor_order == 1 pertinence -2
+        init_using_default_values( self )
+        _update_cum_index( sizes )
+    
+    #
+    def init( sizes, default_value ) when sizes.tensor_order == 1 pertinence -2
+        init( sizes = sizes )
+        for d in data
+            d = default_value
+    
+    #
+    def init( sizes, function ) when sizes.tensor_order == 1 pertinence -2
+        init( sizes = sizes )
+        for r in rectilinear( sizes )
+            select( r ) = function( r )
+    
+    #
+    def init( function ) pertinence -2
+        data.init()
+        for ind, val in self
+            val = function( ind )
+    
+    #
+    def get_sizes
+        if known_nb_values
+            return static_sizes
+        return _sizes
+        
+    #
+    def reassign_sizes( s )
+        assert( sizes == 0 or sizes[1...] == s[1...], "TODO : resize an Array with initial sizes != 0" )
+        _update_cum_sizes( s )
+        
+    def get_nb_rows  return sizes[0]
+    def get_nb_cols  return sizes[1]
+    #
+    def get_tensor_order
+        assert( static_tensor_order >= 0, "TODO" )
+        return static_tensor_order
+    #
+    def get_cum_index
+        if known_nb_values
+            return static_cum_index
+        return dynamic_cum_index
+        
+    def get_nb_values           return data.size
+    def get_values              return data
+    def reassign_values( val )  data = val
+    def init_values( val )      data.init( default_value = val )
+        
+    def index( varargs )                   return sum( varargs * cum_index )
+    def index( n ) when n.tensor_order==1  return sum( n * cum_index ) # A[ [1,2,3] ]
+        
+    def select( n ) when n.tensor_order == 1 pertinence 5
+        return data[ dot( n, cum_index ) ]
+        
+    def select( n ) when n.tensor_order == 0 pertinence 3
+        return data[ n ]
+        
+    def select( varargs ) when varargs.nb_named_arguments()==0 and varargs.nb_unnamed_arguments()==self.tensor_order pertinence 2 # Ex: select(1,2,3) (several arguments)
+        return select( varargs )
+    # def get_attr( str )
+        # return IndexedTensor( self, str )
+    
+    def __for__( block )
+        cpt := 0
+        for v in data
+            ind := Vec[ ST ]( size = get_tensor_order() )
+            tmp := cpt++
+            for c in ( 0 .. get_tensor_order() ).reversed
+                s := get_sizes()[c]
+                #for i, s in ind.reversed, get_sizes().reversed
+                ind[c].init( tmp % s )
+                tmp //= s
+            block( make_varargs( ind, v ) )
+    
+## stdout << Array ##
+def write_to_stream( self, stream ) when self.is_an_array
+    for i, cpt in self.data, 0...
+        stream << i << stream.options.separators[ self.cum_index.size - 1 - self.cum_index.index_of_first_item_that_checks( cpt % _0 == _0 - 1 ) ]
+
+
+## make an array from a LittleHeterogeneousArray ##
+def dyn_array( data ) when have_same_name( type_of(data), LittleHeterogeneousArray )
+    if data.values.nb_unnamed_arguments() == 0  return VoidArray()
+    res := Array[ type_promote( data.values, reassign ), data.sizes ]()
+    for i, j in zip( res.data, data.values )  i = j
+    return res
+
+## make an array from a LittleHeterogeneousArray ##
+def stat_array( data ) when have_same_name( type_of(data), LittleHeterogeneousArray )
+    if data.values.nb_unnamed_arguments() == 0  return VoidArray()
+    res := Array[ type_promote( data.values, reassign ), data.sizes ]()
+    for i, j in zip( res.data, data.values )  i = j
+    return res
+    
+
+# ----------------------------------------------- ----------------------------------------------- -----------------------------------------------
+
+## Ex : [1,2]+["toto","tata"] -> VecOp with refs on the two vector and operation add equivalent to ["1toto","2tata"] ##
+class ArrayOp
+    property is_an_array
+    
+    op := InternalVariable() # we don't use Def because interpreter would be confused about store_in_inst and so on
+    va := VarArgs() # arrays
+    
+    def init( function, varargs ) when varargs.size assert(varargs.size,"pouet"); op.init_using_var( function ); va.init( varargs )
+    def get_tensor_order  return va[0].tensor_order
+    def get_sizes         return va[0].sizes
+    def get_cum_index     return va[0].cum_index
+    def select( n )
+        v := VarArgs(); for array in va v.push_unnamed( array[n] )
+        return call_with_return( @op, v )
+    def conversion_to( b ) when is_of_type_Bool(b) and @op == equal
+        b.init( all( self ) )
+    def conversion_to( b ) when is_of_type_Bool(b)
+        assert( 0, "Direct conversion of a vector to a Bool is illegal. One should use an operator like 'any', 'all'..." )
+        b.init( Error() )
+    def get_data
+        res := VecOp()
+        res.op.init_using_var( @op )
+        res.va = va.map( _0.data )
+        return res
+
+## general definition of map ##
+def map( self, function ) when self.is_an_array
+    res := ArrayOp()
+    res.op.init_using_var( function )
+    res.va.push_unnamed( self )
+    return res
+
+
+## array with all identical values ##
+class ArrayCst
+    property is_an_array
+    
+    val := InternalVariable()
+    sizes_ := InternalVariable()
+    
+    def init( s, value )        sizes_.init_using_var( s ); val.init_using_var( value )
+    def get_tensor_order                 return sizes_->size
+    def get_sizes               return @sizes_
+    def select( n )             return @val
+    def get_data                return VecCst( product( @sizes_ ), @val )
+    
+## ##
+def array_cst( sizes, val )  return ArrayCst( sizes, val )
+
+# -------------------------------------------- 
+def write_vti( a, f ) when a.tensor_order in [1,2,3]
+    s_0 := a.sizes[0]
+    s_1 := a.sizes[1*(a.tensor_order>=2)]*(a.tensor_order>=2)
+    s_2 := a.sizes[2*(a.tensor_order>=3)]*(a.tensor_order>=3)
+    nb_c := 1
+    if a[0].tensor_order == 1
+        nb_c = nb_sub_element_of_flatten_list( a[0] )
+    f <<< "<?xml version='1.0'?>"
+    f <<< "<VTKFile type='ImageData' version='0.1' byte_order='LittleEndian'>"
+    f <<< "  <ImageData WholeExtent='0 $(s_0-1) 0 $(s_1-1) 0 $(s_2-1)' Origin='0 0 0' Spacing='1 1 1'>"
+    f <<< "    <Piece Extent='0 $(s_0-1)  0 $(s_1-1) 0 $(s_2-1)'>"
+    f <<< "      <PointData Scalars='offset'>"
+    f <<< "        <DataArray type='Float64' Name='offset' format='ascii' NumberOfComponents='$nb_c'>"
+    if a.tensor_order == 2
+        for i in 0 .. s_0
+            f << a[i] << " "
+    else if a.tensor_order == 2
+        for i in 0 .. s_0
+            for j in 0 .. s_1
+                f << a[i,j] << " "
+    else
+        for i in 0 .. s_0
+            for j in 0 .. s_1
+                for k in 0 .. s_2
+                    f << a[i,j,k] << " "
+    f << "        </DataArray>"
+    f << "      </PointData>"
+    f << "      <CellData>"
+    f << "      </CellData>"
+    f << "    </Piece>"
+    f << "  </ImageData>"
+    f << "</VTKFile>"
+
+def display_paraview( a, name_file = "tmp.vti" ) when a.tensor_order in [1,2,3]
+    f := File( name_file, "w" )
+    write_vti( a, f )
+    f.close()
+    system( "paraview --data=$name_file" )
+

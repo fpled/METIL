@@ -1,0 +1,61 @@
+import "lazy/LazyVec.met"
+
+#~
+~#
+class FieldInterpolation[ sizes ]
+    sym := Vec[ Op ]()
+    val := Tensor[ Op, sizes ]()
+
+#~
+~#
+class FieldInterpolation[ sizes ] when sizes.size == 0
+    sym := Vec[ Op ]()
+    val := Op()
+
+#~
+    For now -> specialized for Mesh data
+~# 
+class Field[ T = Float64, ST = SizeType ]
+    property is_a_Field
+    static sizes := Vec[Int32,max(0,T::tensor_order)]()
+    if T::tensor_order > 0
+        assert( T::has_static_sizes, "in Field[T], T (-> $T) must be a scalar or something with has_static_size property" )
+        sizes = T::static_sizes
+    static const nb_values_per_data := product( sizes, 1 )
+    static const ScalarType := T::scalar_type
+    
+    data           := LazyVec[ ST ]()
+    support        := Ptr[ FieldSupport ]( NULL )
+    unit           := ""
+    met_name       := ""
+    tex_name       := ""
+    interpolations := Map[ String, FieldInterpolation[ sizes ] ]() # 
+    
+    def get_nb_nodes
+        return data.size
+
+    def get_dim
+        return support->dim_
+
+#~
+    Ancestor of classes such as Mesh[ dim, T, ST ] which contains ...
+~#
+class FieldSupport
+    property is_a_FieldSupport
+        
+    virtual def get_spdim
+        abstract
+        
+# assuming FEM interpolation
+def grad( field ) when field.is_a_Field
+    m := child_cast( field.support )
+    #
+    res := Field[ Tensor[ field.ScalarType, stat_size( field.sizes +++ [ field.dim ] ) ], field.ST ]()
+    res.data = field.data
+    res.support = field.support
+    res.unit = field.unit + "/m"
+    for TE in m->elem_list.sub_types
+        interp := &res.interpolations[ String(TE::NE) ]
+        interp->val = TE::sym_elt.grad( field.interpolations[ String(TE::NE) ].val )
+    return res
+

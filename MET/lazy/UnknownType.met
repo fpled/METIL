@@ -1,0 +1,8 @@
+#~
+~#
+class UnknownType
+    property is_an_UnknownType
+    
+#
+def type_promote( a, b, op ) when a.is_an_UnknownType or b.is_an_UnknownType
+    return UnknownType

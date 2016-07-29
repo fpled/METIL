@@ -1,0 +1,5 @@
+#define HAVE_MPI
+#include "mpi.h"
+#undef CONST
+#include "metil_main.h"
+
