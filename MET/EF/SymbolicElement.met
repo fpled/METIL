@@ -390,7 +390,7 @@ class SymbolicElement[ TE, dim = Int32( TE::nvi ) ] inherits SymbolicElementAnce
             return TR( dot( vec, base ) )
         assert( 0, "TODO" )
     
-    # helper function -> give a new "field" based on "canonical" interpolation
+    # helper function -> give a new "field" based on "nodal" interpolation
     def new_variable( name, interpolation_type, nb_dim = [], sym = Vec[ Op ](), interpolation_base = "lagrange", symm = false ) when interpolation_type == "nodal"
         if nb_dim.size == 0
             vec := Vec[ Op, nb_nodes ]()
@@ -433,7 +433,7 @@ class SymbolicElement[ TE, dim = Int32( TE::nvi ) ] inherits SymbolicElementAnce
             return TR( pe.interpolation( var_inter, mat, interpolation_base ) )
         assert( 0, "TODO" )
     
-    # helper function -> give a new "field" based on "canonical" interpolation
+    # helper function -> give a new "field" based on "enriched_nodal" interpolation
     def new_variable( name, interpolation_type, deg, nb_dim = [], sym = Vec[ Op ](), interpolation_base = "lagrange", symm = false ) when interpolation_type == "enriched_nodal"
         nb_points := generic_points(deg).size
         if nb_dim.size == 0
@@ -477,7 +477,7 @@ class SymbolicElement[ TE, dim = Int32( TE::nvi ) ] inherits SymbolicElementAnce
             return TR( pe.generic_interpolation( var_inter, mat, interpolation_base, deg ) )
         assert( 0, "TODO" )
     
-    # helper function -> give a new "field" based on "canonical" interpolation
+    # helper function -> give a new "field" based on "vertex_nodal" interpolation
     def new_variable( name, interpolation_type, nb_dim = [], sym = Vec[ Op ](), symm = false ) when interpolation_type == "vertex_nodal"
         nb_vertex_nodes := 0
         for i in 0.. nb_nodes
@@ -532,7 +532,7 @@ class SymbolicElement[ TE, dim = Int32( TE::nvi ) ] inherits SymbolicElementAnce
             return TR( pe.interpolation_vertex( var_inter, mat ) )
         assert( 0, "TODO" )
     
-    # helper function -> give a new "field" based on "canonical" interpolation
+    # helper function -> give a new "field" based on "global" or "elementary" interpolation
     def new_variable( name, interpolation_type, nb_dim = [], sym = Vec[ Op ](), symm = false ) when interpolation_type in [ "global", "elementary" ]
         bn := [ name_elem, "f" ][ interpolation_type == "global" ]
         if nb_dim.size == 0
@@ -560,7 +560,7 @@ class SymbolicElement[ TE, dim = Int32( TE::nvi ) ] inherits SymbolicElementAnce
             return mat
         assert( 0, "TODO" )
     
-    # helper function -> give a new "field" based on "canonical" interpolation
+    # helper function -> give a new "field" based on "_minus_1" interpolation
     def new_variable( name, interpolation_type, symbol_function, sym = Vec[ Op ]() ) when interpolation_type.ends_by( "_minus_1" )
         wanted_interpolation := interpolation_type[ 0 .. interpolation_type.size - "_minus_1".size ]
         sp := Vec[ Op ]()
