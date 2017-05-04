@@ -2,47 +2,47 @@
 #~
   sigma from epsilon for an isotropic elastic material
 ~#
-def sigma_hooke_iso( eps, young, poisson, type_stress_2D = "plane stress" )
+def sigma_hooke_iso( eps, young, poisson, hyp_plane_2D = "plane stress" )
     dim := eps.nb_rows
     Id := Mat[ Op, Gen[dim,dim] ]( function = x => x[0] == x[1] )
     if dim == 3
         return young / ( 1 + poisson ) * ( eps + poisson / ( 1 - 2 * poisson ) * trace( eps ) * Id )
     if dim == 2
-        if type_stress_2D == "plane stress"
+        if hyp_plane_2D == "plane stress"
             return young / ( 1 + poisson ) * ( eps + poisson / ( 1 - poisson ) * trace( eps ) * Id )
-        if type_stress_2D == "plane strain"
+        if hyp_plane_2D == "plane strain"
             return young / ( 1 + poisson ) * ( eps + poisson / ( 1 - 2 * poisson ) * trace( eps ) * Id )
-        assert( 0, "Unknown type stress $type_stress_2D" )
+        assert( 0, "Unknown type stress $hyp_plane_2D" )
     if dim == 1
         return young * eps
 
 #~
   epsilon from sigma for an isotropic elastic material
 ~#
-def eps_hooke_iso( sigma, young, poisson, type_stress_2D = "plane stress" )
+def eps_hooke_iso( sigma, young, poisson, hyp_plane_2D = "plane stress" )
     dim := sigma.nb_rows
     Id := Mat[ Op, Gen[dim,dim] ]( function = x => x[0] == x[1] )
     if dim == 3
         return ( 1 + poisson ) / young * sigma - poisson / young  * trace( sigma ) * Id
     if dim == 2
-        if type_stress_2D == "plane stress"
+        if hyp_plane_2D == "plane stress"
             return ( 1 + poisson ) / young * sigma - poisson / young  * trace( sigma ) * Id
-        if type_stress_2D == "plane strain"
+        if hyp_plane_2D == "plane strain"
             return ( 1 + poisson ) / young * sigma - ( 1 + poisson ) * poisson / young  * trace( sigma ) * Id
-        assert( 0, "Unknown type stress $type_stress_2D" )
+        assert( 0, "Unknown type stress $hyp_plane_2D" )
     if dim == 1
         return 1 / young * sigma
 
 #~
   sigma from epsilon for an isotropic elastic material
 ~#
-def hooke_iso( E, nu, dim = 3, type_stress_2D = "plane stress" )
+def hooke_iso( E, nu, dim = 3, hyp_plane_2D = "plane stress" )
     H := Tensor[ Op, [dim,dim,dim,dim] ]( function = x => 0 )
     if dim == 1
         H[0,0,0,0] = E
     else
         e := Mat[ Op, Gen[dim,dim] ]( function = x => symbol("e_{$(x)}") )
-        s := sigma_hooke_iso( e, E, nu, type_stress_2D )
+        s := sigma_hooke_iso( e, E, nu, hyp_plane_2D )
         # -> sigma.diff( epsilon )
         for ind_s, val_s in s
             for ind_e, val_e in e
@@ -73,15 +73,15 @@ def von_mises( sigma ) when sigma.is_a_matrix pertinence 10
 #~
   lame coeff lambda for an isotropic elastic material
 ~#
-def lame_coeff_lambda( young, poisson, dim = 3, type_stress_2D = "plane stress" )
+def lame_coeff_lambda( young, poisson, dim = 3, hyp_plane_2D = "plane stress" )
     if dim == 3
         return young * poisson / ( ( 1 - 2 * poisson ) * ( 1 + poisson ) )
     if dim == 2
-        if type_stress_2D == "plane stress"
+        if hyp_plane_2D == "plane stress"
             return young * poisson / ( ( 1 - poisson ) * ( 1 + poisson ) )
-        if type_stress_2D == "plane strain"
+        if hyp_plane_2D == "plane strain"
             return young * poisson / ( ( 1 - 2 * poisson ) * ( 1 + poisson ) )
-        assert( 0, "Unknown type stress $type_stress_2D" )
+        assert( 0, "Unknown type stress $hyp_plane_2D" )
     if dim == 1
         return young * poisson / ( 1 + poisson )
 
@@ -94,13 +94,13 @@ def lame_coeff_mu( young, poisson )
 #~
   parameter kappa for an isotropic elastic material
 ~#
-def parameter_kappa( poisson, dim = 2, type_stress_2D = "plane stress" )
+def parameter_kappa( poisson, dim = 2, hyp_plane_2D = "plane stress" )
     if dim == 2
-        if type_stress_2D == "plane stress"
+        if hyp_plane_2D == "plane stress"
             return ( 3 - poisson ) / ( 1 + poisson )
-        if type_stress_2D == "plane strain"
+        if hyp_plane_2D == "plane strain"
             return 3 - 4 * poisson
-        assert( 0, "Unknown type stress $type_stress_2D" )
+        assert( 0, "Unknown type stress $hyp_plane_2D" )
     if dim == 3
         return ( 3 - poisson ) / ( 1 + poisson )
         # assert( 0, "kappa not implemented for dim $dim" )
